@@ -1,0 +1,626 @@
+ (cd "$(git rev-parse --show-toplevel)" && git apply --3way <<'EOF' 
+diff --git a/CYD_Framework_LGFX_LVGL_Final_COMPILE_OK_FIXED6.ino b/CYD_Framework_LGFX_LVGL_Final_COMPILE_OK_FIXED6.ino
+index d70feb4b40ef4018cf2fdd1226311f369c1be556..b1e0c9a2fd55cccc6b046cdebb562fbec79c4382 100644
+--- a/CYD_Framework_LGFX_LVGL_Final_COMPILE_OK_FIXED6.ino
++++ b/CYD_Framework_LGFX_LVGL_Final_COMPILE_OK_FIXED6.ino
+@@ -73,227 +73,141 @@ static inline void i2cMarkRx() { g_i2c_rx_count++; g_i2c_rx_blink = true; }
+   #include <lgfx/v1/panel/Panel_ST7789.hpp>
+   #include <lgfx/v1/panel/Panel_ST7796.hpp>
+   #include <lgfx/v1/platforms/esp32s3/Panel_RGB.hpp>
+ 
+   // Bus drivers
+   #include <lgfx/v1/platforms/esp32/Bus_SPI.hpp>
+   #include <lgfx/v1/platforms/esp32s3/Bus_RGB.hpp>
+ 
+   // Touch drivers
+   #include <lgfx/v1/touch/Touch_XPT2046.hpp>
+   #include <lgfx/v1/touch/Touch_GT911.hpp>
+   // Note: Capacitive touch ICs vary widely on small CYD variants.
+   // We keep touch abstraction in config; presets may enable/disable touch.
+ #endif
+ 
+ 
+ // Global runtime toggle used by the UI and handlers.
+ // (When SD_SUPPORT_ENABLED==0 this still exists but stays false.)
+ bool isSDEnabled = (SD_SUPPORT_ENABLED != 0);
+ 
+ #if SD_SUPPORT_ENABLED
+ 
+   // Shared SD state
+   static bool   g_sdMounted = false;
+   static String g_sdMountMsg = "";
++  static int    g_sd_cs   = SD_CS;
++  static int    g_sd_mosi = SD_MOSI;
++  static int    g_sd_miso = SD_MISO;
++  static int    g_sd_sck  = SD_SCK;
+ 
+   // Upload state
+   static bool   g_sdUploadOk = false;
+   static String g_sdUploadMsg;
+   #include <SPI.h>
+ 
+-	// SD library selection (Arduino IDE friendly):
+-	// This sketch is intended to compile out-of-the-box on Arduino-ESP32 v3.x
+-	// using the core-provided SD.h (fs::File). SdFat is OPTIONAL; if you want it,
+-	// you can re-enable it manually, but the default is SD.h.
+-	#define CYD_USE_SDFAT 0
+-	#include <SD.h>
+-
+-  // If we're on SD.h (not SdFat), define a minimal flag API used elsewhere.
+-  typedef uint32_t oflag_t;
+-  #ifndef O_RDONLY
+-    #define O_RDONLY 0x0001
+-  #endif
+-  #ifndef O_WRITE
+-    #define O_WRITE  0x0002
+-  #endif
+-  #ifndef O_RDWR
+-    #define O_RDWR   (O_RDONLY | O_WRITE)
+-  #endif
+-  #ifndef O_CREAT
+-    #define O_CREAT  0x0004
+-  #endif
+-  #ifndef O_TRUNC
+-    #define O_TRUNC  0x0008
+-  #endif
++  // SdFat library selection (explicit to avoid SD.h conflicts).
++  #define CYD_USE_SDFAT 1
++  #include <SdFat.h>
+ 
+ // ===================================================================================
+-// SD Abstraction Layer (SdFat preferred, SD.h fallback)
+-// - Keeps the rest of the sketch stable regardless of which SD library you have.
++// SD Abstraction Layer (SdFat)
++// - Keeps the rest of the sketch stable regardless of calling site.
+ // ===================================================================================
+-#if SD_SUPPORT_ENABLED
+-
+-#if CYD_USE_SDFAT
+   // ---- SdFat backend ----
+   static SdFat sd;
+   typedef FsFile SDFile;
+   static bool sdMount() {
+     if (g_sdMounted) return true;
+-    SPI.begin(SD_SCK, SD_MISO, SD_MOSI, SD_CS);
+-    if (!sd.begin(SD_CS, SD_SCK_MHZ(12))) {
++    const uint8_t SD_CS_PIN = (uint8_t)g_sd_cs;
++    SPI.begin(g_sd_sck, g_sd_miso, g_sd_mosi, SD_CS_PIN);
++    SdSpiConfig config(SD_CS_PIN, SHARED_SPI, SD_SCK_MHZ(16));
++    if (!sd.begin(config)) {
+       g_sdMounted = false;
+       g_sdMountMsg = "SD mount failed";
+       return false;
+     }
+     g_sdMounted = true;
+     g_sdMountMsg = "OK";
+     return true;
+   }
+ 
+   static void sdUnmount() {
+     // SdFat doesn't have a universal "end" across all configs; treat as logical unmount.
+     g_sdMounted = false;
+   }
+ 
+   static bool sdExists(const char* path) { if (!g_sdMounted && !sdMount()) return false; return sd.exists(path); }
+   static bool sdMkdir(const char* path)  { if (!g_sdMounted && !sdMount()) return false; return sd.mkdir(path); }
+   static bool sdRemove(const char* path) { if (!g_sdMounted && !sdMount()) return false; return sd.remove(path); }
+   static bool sdRmdir(const char* path)  { if (!g_sdMounted && !sdMount()) return false; return sd.rmdir(path); }
+   static bool sdRename(const char* f, const char* t) { if (!g_sdMounted && !sdMount()) return false; return sd.rename(f, t); }
+ 
+   static SDFile sdOpen(const char* path, oflag_t flags) {
+     if (!g_sdMounted && !sdMount()) return SDFile();
+     return sd.open(path, flags);
+   }
+ 
+   static bool sdIsDir(const char* path) {
+     SDFile f = sdOpen(path, O_RDONLY);
+     if (!f) return false;
+     bool isDir = f.isDir();
+     f.close();
+     return isDir;
+   }
+ 
+   static bool sdGetStats(uint64_t &totalBytes, uint64_t &usedBytes) {
+     totalBytes = 0; usedBytes = 0;
+     if (!g_sdMounted && !sdMount()) return false;
+     if (!sd.vol()) return false;
+     uint32_t cCount = sd.vol()->clusterCount();
+     uint32_t spc = sd.vol()->blocksPerCluster();
+     uint32_t bps = 512;
+     totalBytes = (uint64_t)cCount * (uint64_t)spc * (uint64_t)bps;
+     uint32_t freeClusters = sd.vol()->freeClusterCount();
+     uint64_t freeBytes = (uint64_t)freeClusters * (uint64_t)spc * (uint64_t)bps;
+     usedBytes = totalBytes - freeBytes;
+     return true;
+   }
+ 
+-#else
+-  // ---- SD.h backend ----
+-  typedef File SDFile;
+-  static bool sdMount() {
+-    if (g_sdMounted) return true;
+-    SPI.begin(SD_SCK, SD_MISO, SD_MOSI, SD_CS);
+-    if (!SD.begin(SD_CS, SPI, 12000000)) {
+-      g_sdMounted = false;
+-      g_sdMountMsg = "SD mount failed";
+-      return false;
+-    }
+-    g_sdMounted = true;
+-    g_sdMountMsg = "OK";
+-    return true;
+-  }
+-
+-  static void sdUnmount() {
+-    // SD.h does not reliably support end() on all cores; treat as logical unmount.
+-    g_sdMounted = false;
+-  }
+-
+-  static bool sdExists(const char* path) { if (!g_sdMounted && !sdMount()) return false; return SD.exists(path); }
+-  static bool sdMkdir(const char* path)  { if (!g_sdMounted && !sdMount()) return false; return SD.mkdir(path); }
+-  static bool sdRemove(const char* path) { if (!g_sdMounted && !sdMount()) return false; return SD.remove(path); }
+-  static bool sdRmdir(const char* path)  { if (!g_sdMounted && !sdMount()) return false; return SD.rmdir(path); }
+-  static bool sdRename(const char* f, const char* t) { if (!g_sdMounted && !sdMount()) return false; return SD.rename(f, t); }
+-
+-  static SDFile sdOpen(const char* path, oflag_t flags) {
+-    if (!g_sdMounted && !sdMount()) return SDFile();
+-    // Map flags to mode string.
+-    const char* mode = "r";
+-    if (flags & O_WRITE) {
+-      if (flags & O_APPEND) mode = "a";
+-      else mode = "w"; // includes O_CREAT/O_TRUNC semantics
+-    }
+-    return SD.open(path, mode);
+-  }
+-
+-  static bool sdIsDir(const char* path) {
+-    SDFile f = sdOpen(path, O_RDONLY);
+-    if (!f) return false;
+-    bool isDir = f.isDirectory();
+-    f.close();
+-    return isDir;
+-  }
+-
+-  static bool sdGetStats(uint64_t &totalBytes, uint64_t &usedBytes) {
+-    // SD.h doesn't expose reliable capacity info across cores.
+-    totalBytes = 0; usedBytes = 0;
+-    return false;
+-  }
+-
+-#endif
+-
+ // ---- Unified helpers (work with SdFat or SD.h) ----
+ static bool sdFileIsDir(SDFile &f) {
+-#if CYD_USE_SDFAT
+   return f.isDir();
+-#else
+-  return f.isDirectory();
+-#endif
+ }
+ 
+ static String sdFileName(SDFile &f) {
+-#if CYD_USE_SDFAT
+   char nm[96];
+   nm[0]=0;
+   f.getName(nm, sizeof(nm));
+   return String(nm);
+-#else
+-  const char* n = f.name();
+-  return n ? String(n) : String("");
+-#endif
+ }
+ 
+ static bool sdOpenNext(SDFile &dir, SDFile &out) {
+-#if CYD_USE_SDFAT
+   SDFile tmp;
+   if (!tmp.openNext(&dir, O_RDONLY)) return false;
+   out = tmp;
+   return (bool)out;
+-#else
+-  out = dir.openNextFile();
+-  return (bool)out;
+-#endif
+ }
+ 
+ 
+ #endif
+ 
+ 
+ // ===================================================================================
+ // CYD Framework Runtime Config (LittleFS: /config.json)
+ // ===================================================================================
+ // This config is intentionally compact to avoid heap churn. All fields have
+ // safe defaults so the web UI always comes up even if display is disabled.
+ 
+ static const char* CFG_PATH = "/config.json";
+ 
+ enum CydModel : uint8_t {
+   CYD_UNKNOWN = 0,
+   CYD_2432S028R,
+   CYD_2432S028C,
+   CYD_2432S022C,
+   CYD_2432S032,
+   CYD_3248S035,
+   CYD_4827S043,
+   CYD_8048S050,
+   CYD_8048S070,
+   CYD_S3_GENERIC
+@@ -326,65 +240,82 @@ struct SystemConfig {
+   CydModel model = CYD_UNKNOWN;
+   PanelKind panel = PANEL_NONE;
+   TouchKind touch = TOUCH_NONE;
+ 
+   // I2C pins (also used for I2C touch, when applicable)
+   int i2c_sda = 21;
+   int i2c_scl = 22;
+ 
+   // SPI panel pins (ESP32-WROOM CYD family defaults)
+   int tft_sck  = 14;
+   int tft_mosi = 13;
+   int tft_miso = 12;
+   int tft_cs   = 15;
+   int tft_dc   = 2;
+   int tft_rst  = -1;
+   int tft_bl   = 21;
+   int tft_freq = 40000000;
+ 
+   // Touch SPI pins (XPT2046-style; some CYDs use a separate SPI bus)
+   int tp_sck  = 25;
+   int tp_mosi = 32;
+   int tp_miso = 39;
+   int tp_cs   = 33;
+   int tp_irq  = 36;
+ 
++  // SD SPI pins (shared with display SPI on most CYD variants)
++  int sd_sck  = SD_SCK;
++  int sd_mosi = SD_MOSI;
++  int sd_miso = SD_MISO;
++  int sd_cs   = SD_CS;
++
+   // RGB/GT911 pins (Sunton S3 7" style, from common community configs)
+   // These are used only for PANEL_RGB_800x480.
+   int rgb_pins[16] = {15,7,6,5,4, 9,46,3,8,16,1, 14,21,47,48,45};
+   int rgb_hen = 41;
+   int rgb_vsync = 40;
+   int rgb_hsync = 39;
+   int rgb_pclk  = 42;
+   int rgb_freq_write = 12000000;
+ 
+   // Splash asset stored in LittleFS (/assets/...) after first boot selection.
+   String splash_path = "/assets/splash";
+ };
+ 
+ static SystemConfig g_cfg;
+ 
++#if SD_SUPPORT_ENABLED
++static void syncSdRuntimePins(const SystemConfig &cfg) {
++  g_sd_sck = cfg.sd_sck;
++  g_sd_mosi = cfg.sd_mosi;
++  g_sd_miso = cfg.sd_miso;
++  g_sd_cs = cfg.sd_cs;
++}
++#else
++static void syncSdRuntimePins(const SystemConfig &) {}
++#endif
++
+ static const char* modelToStr(CydModel m) {
+   switch (m) {
+     case CYD_2432S028R: return "2432S028R";
+     case CYD_2432S028C: return "2432S028C";
+     case CYD_2432S022C: return "2432S022C";
+     case CYD_2432S032:  return "2432S032";
+     case CYD_3248S035:  return "3248S035";
+     case CYD_4827S043:  return "4827S043";
+     case CYD_8048S050:  return "8048S050";
+     case CYD_8048S070:  return "8048S070";
+     case CYD_S3_GENERIC:return "S3_GENERIC";
+     default: return "UNKNOWN";
+   }
+ }
+ 
+ static CydModel strToModel(const String& s) {
+   if (s == "2432S028R") return CYD_2432S028R;
+   if (s == "2432S028C") return CYD_2432S028C;
+   if (s == "2432S022C") return CYD_2432S022C;
+   if (s == "2432S032")  return CYD_2432S032;
+   if (s == "3248S035")  return CYD_3248S035;
+   if (s == "4827S043")  return CYD_4827S043;
+   if (s == "8048S050")  return CYD_8048S050;
+   if (s == "8048S070")  return CYD_8048S070;
+   if (s == "S3_GENERIC")return CYD_S3_GENERIC;
+@@ -395,90 +326,111 @@ static bool cfgExists() {
+   return LittleFS.exists(CFG_PATH);
+ }
+ 
+ static void applyModelPreset(SystemConfig &cfg) {
+   // Base defaults
+   cfg.display_enable = (DEFAULT_DISPLAY_ENABLE != 0);
+   cfg.touch_enable   = (DEFAULT_TOUCH_ENABLE != 0);
+   cfg.lvgl_enable    = (DEFAULT_LVGL_ENABLE != 0);
+   cfg.headless = false;
+ 
+   // I2C defaults from the user's mapping table
+   if (cfg.model == CYD_8048S050 || cfg.model == CYD_8048S070) {
+     cfg.i2c_sda = 19;
+     cfg.i2c_scl = 20;
+   } else if (cfg.model == CYD_S3_GENERIC) {
+     cfg.i2c_sda = 4;
+     cfg.i2c_scl = 5;
+   } else if (cfg.model == CYD_4827S043) {
+     cfg.i2c_sda = 17;
+     cfg.i2c_scl = 18;
+   } else {
+     cfg.i2c_sda = 21;
+     cfg.i2c_scl = 22;
+   }
+ 
++  // SD SPI defaults from the mapping table (shared across CYD variants unless overridden)
++  switch (cfg.model) {
++    case CYD_8048S050:
++    case CYD_8048S070:
++    case CYD_4827S043:
++    case CYD_S3_GENERIC:
++    case CYD_2432S028R:
++    case CYD_2432S028C:
++    case CYD_2432S022C:
++    case CYD_2432S032:
++    case CYD_3248S035:
++    default:
++      cfg.sd_sck  = SD_SCK;
++      cfg.sd_mosi = SD_MOSI;
++      cfg.sd_miso = SD_MISO;
++      cfg.sd_cs   = SD_CS;
++      break;
++  }
++
+   switch (cfg.model) {
+     case CYD_2432S028R:
+     case CYD_2432S028C:
+     case CYD_2432S032:
+       cfg.panel = PANEL_SPI_ILI9341;
+       cfg.touch = (cfg.model == CYD_2432S028R) ? TOUCH_XPT2046 : TOUCH_I2C_GENERIC;
+       break;
+     case CYD_2432S022C:
+       cfg.panel = PANEL_SPI_ST7789;
+       cfg.touch = TOUCH_I2C_GENERIC;
+       break;
+     case CYD_3248S035:
+       cfg.panel = PANEL_SPI_ST7796;
+       cfg.touch = TOUCH_I2C_GENERIC;
+       break;
+     case CYD_8048S050:
+     case CYD_8048S070:
+       cfg.panel = PANEL_RGB_800x480;
+       cfg.touch = TOUCH_GT911;
+       break;
+     case CYD_4827S043:
+       // NV3047 variants vary in bus wiring; we keep panel disabled unless user edits pins.
+       cfg.panel = PANEL_NONE;
+       cfg.touch = TOUCH_I2C_GENERIC;
+       cfg.display_enable = false;
+       cfg.lvgl_enable = false;
+       break;
+     case CYD_S3_GENERIC:
+       cfg.panel = PANEL_NONE;
+       cfg.touch = TOUCH_NONE;
+       cfg.display_enable = false;
+       cfg.lvgl_enable = false;
+       break;
+     default:
+       cfg.panel = PANEL_NONE;
+       cfg.touch = TOUCH_NONE;
+       cfg.display_enable = false;
+       cfg.lvgl_enable = false;
+       break;
+   }
++
++  syncSdRuntimePins(cfg);
+ }
+ 
+ // Establish a known-safe baseline when no config.json exists.
+ static void setConfigDefaults(SystemConfig &cfg) {
+   cfg = SystemConfig();
+   cfg.configured = false;
+   cfg.headless = false;
+   // Start unconfigured: no panel/touch until user selects a model (or headless triggers).
+   cfg.model = CYD_UNKNOWN;
+   applyModelPreset(cfg);
+ }
+ 
+ static bool loadConfig(SystemConfig &cfg) {
+   if (!cfgExists()) return false;
+   File f = LittleFS.open(CFG_PATH, "r");
+   if (!f) return false;
+ 
+   StaticJsonDocument<1536> doc;
+   DeserializationError err = deserializeJson(doc, f);
+   f.close();
+   if (err) return false;
+ 
+   cfg.configured = doc["configured"] | false;
+   cfg.headless   = doc["headless"] | false;
+ 
+@@ -486,89 +438,99 @@ static bool loadConfig(SystemConfig &cfg) {
+   cfg.touch_enable   = doc["touch_enable"]   | (DEFAULT_TOUCH_ENABLE != 0);
+   cfg.lvgl_enable    = doc["lvgl_enable"]    | (DEFAULT_LVGL_ENABLE != 0);
+ 
+   cfg.model = strToModel(String((const char*)(doc["model"] | "UNKNOWN")));
+   cfg.panel = (PanelKind)(doc["panel"] | (int)PANEL_NONE);
+   cfg.touch = (TouchKind)(doc["touch"] | (int)TOUCH_NONE);
+ 
+   cfg.i2c_sda = doc["i2c_sda"] | cfg.i2c_sda;
+   cfg.i2c_scl = doc["i2c_scl"] | cfg.i2c_scl;
+ 
+   cfg.tft_sck  = doc["tft_sck"]  | cfg.tft_sck;
+   cfg.tft_mosi = doc["tft_mosi"] | cfg.tft_mosi;
+   cfg.tft_miso = doc["tft_miso"] | cfg.tft_miso;
+   cfg.tft_cs   = doc["tft_cs"]   | cfg.tft_cs;
+   cfg.tft_dc   = doc["tft_dc"]   | cfg.tft_dc;
+   cfg.tft_rst  = doc["tft_rst"]  | cfg.tft_rst;
+   cfg.tft_bl   = doc["tft_bl"]   | cfg.tft_bl;
+   cfg.tft_freq = doc["tft_freq"] | cfg.tft_freq;
+ 
+   cfg.tp_sck  = doc["tp_sck"]  | cfg.tp_sck;
+   cfg.tp_mosi = doc["tp_mosi"] | cfg.tp_mosi;
+   cfg.tp_miso = doc["tp_miso"] | cfg.tp_miso;
+   cfg.tp_cs   = doc["tp_cs"]   | cfg.tp_cs;
+   cfg.tp_irq  = doc["tp_irq"]  | cfg.tp_irq;
+ 
++  cfg.sd_sck  = doc["sd_sck"]  | cfg.sd_sck;
++  cfg.sd_mosi = doc["sd_mosi"] | cfg.sd_mosi;
++  cfg.sd_miso = doc["sd_miso"] | cfg.sd_miso;
++  cfg.sd_cs   = doc["sd_cs"]   | cfg.sd_cs;
++
+   cfg.splash_path = String((const char*)(doc["splash"] | cfg.splash_path.c_str()));
+ 
+   // If the config says headless, forcibly disable local stack.
+   if (cfg.headless) {
+     cfg.display_enable = false;
+     cfg.touch_enable = false;
+     cfg.lvgl_enable = false;
+     cfg.panel = PANEL_NONE;
+     cfg.touch = TOUCH_NONE;
+   }
+ 
++  syncSdRuntimePins(cfg);
+   return true;
+ }
+ 
+ static bool saveConfig(const SystemConfig &cfg) {
+   StaticJsonDocument<1536> doc;
+   doc["configured"] = cfg.configured;
+   doc["headless"] = cfg.headless;
+   doc["display_enable"] = cfg.display_enable;
+   doc["touch_enable"] = cfg.touch_enable;
+   doc["lvgl_enable"] = cfg.lvgl_enable;
+   doc["model"] = modelToStr(cfg.model);
+   doc["panel"] = (int)cfg.panel;
+   doc["touch"] = (int)cfg.touch;
+   doc["i2c_sda"] = cfg.i2c_sda;
+   doc["i2c_scl"] = cfg.i2c_scl;
+   doc["tft_sck"] = cfg.tft_sck;
+   doc["tft_mosi"] = cfg.tft_mosi;
+   doc["tft_miso"] = cfg.tft_miso;
+   doc["tft_cs"] = cfg.tft_cs;
+   doc["tft_dc"] = cfg.tft_dc;
+   doc["tft_rst"] = cfg.tft_rst;
+   doc["tft_bl"] = cfg.tft_bl;
+   doc["tft_freq"] = cfg.tft_freq;
+   doc["tp_sck"] = cfg.tp_sck;
+   doc["tp_mosi"] = cfg.tp_mosi;
+   doc["tp_miso"] = cfg.tp_miso;
+   doc["tp_cs"] = cfg.tp_cs;
+   doc["tp_irq"] = cfg.tp_irq;
++  doc["sd_sck"] = cfg.sd_sck;
++  doc["sd_mosi"] = cfg.sd_mosi;
++  doc["sd_miso"] = cfg.sd_miso;
++  doc["sd_cs"] = cfg.sd_cs;
+   doc["splash"] = cfg.splash_path;
+ 
+   File f = LittleFS.open(CFG_PATH, "w");
+   if (!f) return false;
+   bool ok = (serializeJson(doc, f) > 0);
+   f.close();
+   return ok;
+ }
+ 
+ // ===================================================================================
+ // LovyanGFX + LVGL glue
+ // ===================================================================================
+ #if DISPLAY_SUPPORT_ENABLED
+ class LGFX : public lgfx::LGFX_Device {
+ public:
+   lgfx::Bus_SPI _bus_spi;
+   lgfx::Panel_ILI9341 _panel_ili;
+   lgfx::Panel_ST7789  _panel_7789;
+   lgfx::Panel_ST7796  _panel_7796;
+ 
+   lgfx::Bus_RGB _bus_rgb;
+   lgfx::Panel_RGB _panel_rgb;
+ 
+   lgfx::Light_PWM _light_pwm;
+ 
+@@ -2399,51 +2361,51 @@ const char SETTINGS_HTML[] PROGMEM = R"rawliteral(
+ // ===================================================================================
+ 
+ // --- Storage layout (ESP32 LittleFS) ---
+ static const char* FW_DIR = "/fw";
+ static const char* CFG_DIR = "/config";
+ 
+ // --- Upload status (ESP32 WebServer requires single response in POST handler) ---
+ static bool g_hexUploadOk = false;
+ static String g_hexUploadMsg = "";
+ static String g_hexUploadPath = "";
+ static File g_hexUploadFile;
+ static IntelHexSW8B g_hexConv;
+ static bool g_fwUploadOk = false;
+ static String g_fwUploadMsg = "";
+ static String g_fwUploadPath = "";
+ static File g_fwUploadFile;
+ 
+ // Backward-compat aliases used by some SD handlers
+ #if SD_SUPPORT_ENABLED
+ static inline SDFile sd_open(const char* path, oflag_t flags) { return sdOpen(path, flags); }
+ static inline SDFile sd_open(const String& path, oflag_t flags) { return sdOpen(path.c_str(), flags); }
+ static inline bool sd_rename(const char* from, const char* to) { return sdRename(from, to); }
+ static inline bool sd_rename(const String& from, const String& to) { return sdRename(from.c_str(), to.c_str()); }
+ static inline uint64_t sd_filesize(SDFile& f) {
+   // SdFat file type exposes fileSize(); fs::File exposes size().
+-#if SD_USE_SDFAT
++#if CYD_USE_SDFAT
+   return (uint64_t)f.fileSize();
+ #else
+   return (uint64_t)f.size();
+ #endif
+ }
+ #endif
+ 
+ 
+ #if SD_SUPPORT_ENABLED
+ #if 1
+ // ===================================================================================
+ // SD Card Runtime State + Helpers (disabled: legacy FS/SD.h implementation)
+ // ===================================================================================
+ // Use default SPI instance for SD (portable across ESP32 variants)
+ // (g_sdMountMsg declared once)
+ 
+ // Upload state for SD uploads
+ static bool g_sdUploadOk = false;
+ static String g_sdUploadMsg = "";
+ static String g_sdUploadPath = "";
+ // (SdFat migration) g_sdUploadFile is SDFile (see top of SdFat layer)
+ 
+ static bool sdEnsureMounted();
+ 
+ static bool sdPathIsSafe(const String& pth) {
+@@ -4269,26 +4231,26 @@ void setup() {
+   ArduinoOTA.begin();
+ }
+ 
+ void loop() {
+   ArduinoOTA.handle();
+   server.handleClient();
+   handleTcpBridge();
+ 
+ #if DISPLAY_SUPPORT_ENABLED
+   if (g_lvgl_ready) {
+     static uint32_t last = millis();
+     uint32_t now = millis();
+     uint32_t dt = now - last;
+     last = now;
+ #if LVGL_VERSION_MAJOR >= 9
+     lv_tick_set(lv_tick_get() + dt);
+ #else
+   #if defined(LVGL_VERSION_MAJOR) && (LVGL_VERSION_MAJOR < 9)
+     // LVGL v8 uses a software tick increment.
+     lv_tick_inc(dt);
+   #endif
+ #endif
+     lvglTickAndUpdate();
+   }
+ #endif
+-}
+\ No newline at end of file
++}
+ 
+EOF
+)
