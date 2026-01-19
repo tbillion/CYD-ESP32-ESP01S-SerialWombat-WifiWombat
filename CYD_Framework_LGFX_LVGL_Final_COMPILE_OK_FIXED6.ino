@@ -95,51 +95,33 @@ bool isSDEnabled = (SD_SUPPORT_ENABLED != 0);
   // Shared SD state
   static bool   g_sdMounted = false;
   static String g_sdMountMsg = "";
+  static int    g_sd_cs   = SD_CS;
+  static int    g_sd_mosi = SD_MOSI;
+  static int    g_sd_miso = SD_MISO;
+  static int    g_sd_sck  = SD_SCK;
 
   // Upload state
   static bool   g_sdUploadOk = false;
   static String g_sdUploadMsg;
   #include <SPI.h>
 
-	// SD library selection (Arduino IDE friendly):
-	// This sketch is intended to compile out-of-the-box on Arduino-ESP32 v3.x
-	// using the core-provided SD.h (fs::File). SdFat is OPTIONAL; if you want it,
-	// you can re-enable it manually, but the default is SD.h.
-	#define CYD_USE_SDFAT 0
-	#include <SD.h>
-
-  // If we're on SD.h (not SdFat), define a minimal flag API used elsewhere.
-  typedef uint32_t oflag_t;
-  #ifndef O_RDONLY
-    #define O_RDONLY 0x0001
-  #endif
-  #ifndef O_WRITE
-    #define O_WRITE  0x0002
-  #endif
-  #ifndef O_RDWR
-    #define O_RDWR   (O_RDONLY | O_WRITE)
-  #endif
-  #ifndef O_CREAT
-    #define O_CREAT  0x0004
-  #endif
-  #ifndef O_TRUNC
-    #define O_TRUNC  0x0008
-  #endif
+  // SdFat library selection (explicit to avoid SD.h conflicts).
+  #define CYD_USE_SDFAT 1
+  #include <SdFat.h>
 
 // ===================================================================================
-// SD Abstraction Layer (SdFat preferred, SD.h fallback)
-// - Keeps the rest of the sketch stable regardless of which SD library you have.
+// SD Abstraction Layer (SdFat)
+// - Keeps the rest of the sketch stable regardless of calling site.
 // ===================================================================================
-#if SD_SUPPORT_ENABLED
-
-#if CYD_USE_SDFAT
   // ---- SdFat backend ----
   static SdFat sd;
   typedef FsFile SDFile;
   static bool sdMount() {
     if (g_sdMounted) return true;
-    SPI.begin(SD_SCK, SD_MISO, SD_MOSI, SD_CS);
-    if (!sd.begin(SD_CS, SD_SCK_MHZ(12))) {
+    const uint8_t SD_CS_PIN = (uint8_t)g_sd_cs;
+    SPI.begin(g_sd_sck, g_sd_miso, g_sd_mosi, SD_CS_PIN);
+    SdSpiConfig config(SD_CS_PIN, SHARED_SPI, SD_SCK_MHZ(16));
+    if (!sd.begin(config)) {
       g_sdMounted = false;
       g_sdMountMsg = "SD mount failed";
       return false;
@@ -187,91 +169,23 @@ bool isSDEnabled = (SD_SUPPORT_ENABLED != 0);
     return true;
   }
 
-#else
-  // ---- SD.h backend ----
-  typedef File SDFile;
-  static bool sdMount() {
-    if (g_sdMounted) return true;
-    SPI.begin(SD_SCK, SD_MISO, SD_MOSI, SD_CS);
-    if (!SD.begin(SD_CS, SPI, 12000000)) {
-      g_sdMounted = false;
-      g_sdMountMsg = "SD mount failed";
-      return false;
-    }
-    g_sdMounted = true;
-    g_sdMountMsg = "OK";
-    return true;
-  }
-
-  static void sdUnmount() {
-    // SD.h does not reliably support end() on all cores; treat as logical unmount.
-    g_sdMounted = false;
-  }
-
-  static bool sdExists(const char* path) { if (!g_sdMounted && !sdMount()) return false; return SD.exists(path); }
-  static bool sdMkdir(const char* path)  { if (!g_sdMounted && !sdMount()) return false; return SD.mkdir(path); }
-  static bool sdRemove(const char* path) { if (!g_sdMounted && !sdMount()) return false; return SD.remove(path); }
-  static bool sdRmdir(const char* path)  { if (!g_sdMounted && !sdMount()) return false; return SD.rmdir(path); }
-  static bool sdRename(const char* f, const char* t) { if (!g_sdMounted && !sdMount()) return false; return SD.rename(f, t); }
-
-  static SDFile sdOpen(const char* path, oflag_t flags) {
-    if (!g_sdMounted && !sdMount()) return SDFile();
-    // Map flags to mode string.
-    const char* mode = "r";
-    if (flags & O_WRITE) {
-      if (flags & O_APPEND) mode = "a";
-      else mode = "w"; // includes O_CREAT/O_TRUNC semantics
-    }
-    return SD.open(path, mode);
-  }
-
-  static bool sdIsDir(const char* path) {
-    SDFile f = sdOpen(path, O_RDONLY);
-    if (!f) return false;
-    bool isDir = f.isDirectory();
-    f.close();
-    return isDir;
-  }
-
-  static bool sdGetStats(uint64_t &totalBytes, uint64_t &usedBytes) {
-    // SD.h doesn't expose reliable capacity info across cores.
-    totalBytes = 0; usedBytes = 0;
-    return false;
-  }
-
-#endif
-
 // ---- Unified helpers (work with SdFat or SD.h) ----
 static bool sdFileIsDir(SDFile &f) {
-#if CYD_USE_SDFAT
   return f.isDir();
-#else
-  return f.isDirectory();
-#endif
 }
 
 static String sdFileName(SDFile &f) {
-#if CYD_USE_SDFAT
   char nm[96];
   nm[0]=0;
   f.getName(nm, sizeof(nm));
   return String(nm);
-#else
-  const char* n = f.name();
-  return n ? String(n) : String("");
-#endif
 }
 
 static bool sdOpenNext(SDFile &dir, SDFile &out) {
-#if CYD_USE_SDFAT
   SDFile tmp;
   if (!tmp.openNext(&dir, O_RDONLY)) return false;
   out = tmp;
   return (bool)out;
-#else
-  out = dir.openNextFile();
-  return (bool)out;
-#endif
 }
 
 
@@ -348,6 +262,12 @@ struct SystemConfig {
   int tp_cs   = 33;
   int tp_irq  = 36;
 
+  // SD SPI pins (shared with display SPI on most CYD variants)
+  int sd_sck  = SD_SCK;
+  int sd_mosi = SD_MOSI;
+  int sd_miso = SD_MISO;
+  int sd_cs   = SD_CS;
+
   // RGB/GT911 pins (Sunton S3 7" style, from common community configs)
   // These are used only for PANEL_RGB_800x480.
   int rgb_pins[16] = {15,7,6,5,4, 9,46,3,8,16,1, 14,21,47,48,45};
@@ -362,6 +282,17 @@ struct SystemConfig {
 };
 
 static SystemConfig g_cfg;
+
+#if SD_SUPPORT_ENABLED
+static void syncSdRuntimePins(const SystemConfig &cfg) {
+  g_sd_sck = cfg.sd_sck;
+  g_sd_mosi = cfg.sd_mosi;
+  g_sd_miso = cfg.sd_miso;
+  g_sd_cs = cfg.sd_cs;
+}
+#else
+static void syncSdRuntimePins(const SystemConfig &) {}
+#endif
 
 static const char* modelToStr(CydModel m) {
   switch (m) {
@@ -417,6 +348,25 @@ static void applyModelPreset(SystemConfig &cfg) {
     cfg.i2c_scl = 22;
   }
 
+  // SD SPI defaults from the mapping table (shared across CYD variants unless overridden)
+  switch (cfg.model) {
+    case CYD_8048S050:
+    case CYD_8048S070:
+    case CYD_4827S043:
+    case CYD_S3_GENERIC:
+    case CYD_2432S028R:
+    case CYD_2432S028C:
+    case CYD_2432S022C:
+    case CYD_2432S032:
+    case CYD_3248S035:
+    default:
+      cfg.sd_sck  = SD_SCK;
+      cfg.sd_mosi = SD_MOSI;
+      cfg.sd_miso = SD_MISO;
+      cfg.sd_cs   = SD_CS;
+      break;
+  }
+
   switch (cfg.model) {
     case CYD_2432S028R:
     case CYD_2432S028C:
@@ -457,6 +407,8 @@ static void applyModelPreset(SystemConfig &cfg) {
       cfg.lvgl_enable = false;
       break;
   }
+
+  syncSdRuntimePins(cfg);
 }
 
 // Establish a known-safe baseline when no config.json exists.
@@ -508,6 +460,11 @@ static bool loadConfig(SystemConfig &cfg) {
   cfg.tp_cs   = doc["tp_cs"]   | cfg.tp_cs;
   cfg.tp_irq  = doc["tp_irq"]  | cfg.tp_irq;
 
+  cfg.sd_sck  = doc["sd_sck"]  | cfg.sd_sck;
+  cfg.sd_mosi = doc["sd_mosi"] | cfg.sd_mosi;
+  cfg.sd_miso = doc["sd_miso"] | cfg.sd_miso;
+  cfg.sd_cs   = doc["sd_cs"]   | cfg.sd_cs;
+
   cfg.splash_path = String((const char*)(doc["splash"] | cfg.splash_path.c_str()));
 
   // If the config says headless, forcibly disable local stack.
@@ -519,6 +476,7 @@ static bool loadConfig(SystemConfig &cfg) {
     cfg.touch = TOUCH_NONE;
   }
 
+  syncSdRuntimePins(cfg);
   return true;
 }
 
@@ -547,6 +505,10 @@ static bool saveConfig(const SystemConfig &cfg) {
   doc["tp_miso"] = cfg.tp_miso;
   doc["tp_cs"] = cfg.tp_cs;
   doc["tp_irq"] = cfg.tp_irq;
+  doc["sd_sck"] = cfg.sd_sck;
+  doc["sd_mosi"] = cfg.sd_mosi;
+  doc["sd_miso"] = cfg.sd_miso;
+  doc["sd_cs"] = cfg.sd_cs;
   doc["splash"] = cfg.splash_path;
 
   File f = LittleFS.open(CFG_PATH, "w");
@@ -2421,7 +2383,7 @@ static inline bool sd_rename(const char* from, const char* to) { return sdRename
 static inline bool sd_rename(const String& from, const String& to) { return sdRename(from.c_str(), to.c_str()); }
 static inline uint64_t sd_filesize(SDFile& f) {
   // SdFat file type exposes fileSize(); fs::File exposes size().
-#if SD_USE_SDFAT
+#if CYD_USE_SDFAT
   return (uint64_t)f.fileSize();
 #else
   return (uint64_t)f.size();
