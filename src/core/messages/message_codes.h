@@ -119,6 +119,7 @@
 // ===================================================================================
 #define I2C_INIT_BEGIN               "I2C_INIT_BEGIN"
 #define I2C_INIT_OK                  "I2C_INIT_OK"
+#define I2C_BUS_OK                   "I2C_BUS_OK"
 #define I2C_BUS_STUCK                "I2C_BUS_STUCK"
 #define I2C_DEVICE_NOT_FOUND         "I2C_DEVICE_NOT_FOUND"
 #define I2C_COMM_ERROR               "I2C_COMM_ERROR"
@@ -128,6 +129,7 @@
 // SerialWombat Messages
 // ===================================================================================
 #define SW_INIT_BEGIN                "SW_INIT_BEGIN"
+#define SW_INIT_OK                   "SW_INIT_OK"
 #define SW_CONNECTED                 "SW_CONNECTED"
 #define SW_NOT_FOUND                 "SW_NOT_FOUND"
 #define SW_VERSION_MISMATCH          "SW_VERSION_MISMATCH"

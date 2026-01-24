@@ -175,10 +175,23 @@ void App::initHardware() {
   WiFi.setSleep(false);
 
   // Apply dynamic I2C pins from config *before* Wire.begin
+  msg_info("i2c", I2C_INIT_BEGIN, "I2C Initialization", 
+           "Configuring I2C bus: SDA=%d, SCL=%d", g_cfg.i2c_sda, g_cfg.i2c_scl);
+  
   Wire.begin(g_cfg.i2c_sda, g_cfg.i2c_scl);
   Wire.setClock(100000);
+  
+  msg_info("i2c", I2C_BUS_OK, "I2C Bus Ready", 
+           "I2C initialized at 100kHz");
 
+  // Initialize SerialWombat
+  msg_info("serialwombat", SW_INIT_BEGIN, "SerialWombat Initialization", 
+           "Initializing SerialWombat at address 0x%02X", currentWombatAddress);
+  
   sw.begin(Wire, currentWombatAddress);
+  
+  msg_info("serialwombat", SW_INIT_OK, "SerialWombat Ready", 
+           "SerialWombat initialized successfully");
 }
 
 void App::initSD() {
@@ -477,9 +490,12 @@ void App::initWebServer() {
 
   // Start web server and TCP server
   server.begin();
-  tcpServer.begin();
+  msg_info("web", WEB_SERVER_START, "Web Server Started", "HTTP server listening on port 80");
   
-  boot_stage_ok(BootStage::BOOT_09_SERVICES, "Web server (port 80) and TCP bridge (port 3000) started");
+  tcpServer.begin();
+  msg_info("tcp", TCP_BRIDGE_START, "TCP Bridge Started", "TCP bridge listening on port %d", TCP_PORT);
+  
+  boot_stage_ok(BootStage::BOOT_09_SERVICES, "Web server (port 80) and TCP bridge (port %d) started", TCP_PORT);
 }
 
 void App::initOTA() {
