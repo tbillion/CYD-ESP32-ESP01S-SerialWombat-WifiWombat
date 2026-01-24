@@ -5,6 +5,9 @@
 #include "../config_manager/config_manager.h"
 #include "../i2c_manager/i2c_manager.h"
 #include "../serialwombat/serialwombat_manager.h"
+#include "../../core/messages/message_center.h"
+#include "../../core/messages/boot_manager.h"
+#include "../../core/messages/health_snapshot.h"
 #include <LittleFS.h>
 #include <WiFi.h>
 #include <WiFiManager.h>
@@ -708,8 +711,33 @@ void handleConfigDelete(WebServer& server) {
 void handleApiHealth(WebServer& server) {
   addSecurityHeaders(server);
   
-  DynamicJsonDocument doc(512);
-  doc["status"] = "ok";
+  // Update health snapshot
+  HealthSnapshotManager::getInstance().update();
+  auto health = HealthSnapshotManager::getInstance().getSnapshot();
+  
+  DynamicJsonDocument doc(1024);
+  
+  // Overall health
+  doc["status"] = HealthSnapshotManager::getInstance().getHealthString();
+  doc["overall_health"] = (int)health.overall;
+  doc["boot_complete"] = health.boot_complete;
+  doc["boot_degraded"] = health.boot_degraded;
+  
+  // Message counts
+  doc["active_messages"] = health.active_count;
+  doc["error_count"] = health.error_count;
+  doc["warn_count"] = health.warn_count;
+  doc["info_count"] = health.info_count;
+  
+  // Subsystem status
+  JsonObject subsystems = doc.createNestedObject("subsystems");
+  subsystems["filesystem"] = health.filesystem_ok;
+  subsystems["sd_present"] = health.sd_present;
+  subsystems["display"] = health.display_ok;
+  subsystems["network"] = health.network_ok;
+  subsystems["services"] = health.services_ok;
+  
+  // System metrics
   doc["uptime_ms"] = millis();
   doc["heap_free"] = ESP.getFreeHeap();
   doc["wifi_connected"] = WiFi.isConnected();

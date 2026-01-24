@@ -37,6 +37,9 @@
 // HAL
 #include "../hal/storage/sd_storage.h"
 
+// Core messages and health
+#include "../core/messages/health_snapshot.h"
+
 // UI
 #include "../ui/lvgl_wrapper.h"
 #include "../ui/screens/setup_wizard.h"
@@ -537,11 +540,23 @@ void App::update() {
   updateWebServer();
   updateTCPBridge();
   updateDisplay();
+  updateHealthSnapshot();
 }
 
 // ===================================================================================
 // Runtime Update Phases
 // ===================================================================================
+
+void App::updateHealthSnapshot() {
+  // Update health snapshot every 5 seconds
+  static uint32_t last_update = 0;
+  uint32_t now = millis();
+  
+  if (now - last_update >= 5000) {
+    HealthSnapshotManager::getInstance().update();
+    last_update = now;
+  }
+}
 
 void App::updateOTA() {
   ArduinoOTA.handle();
