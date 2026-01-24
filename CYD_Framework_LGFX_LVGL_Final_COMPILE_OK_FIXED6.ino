@@ -59,8 +59,21 @@ static uint64_t sd_used_bytes();
 #define SECURITY_ENABLED 1
 #define AUTH_USERNAME "admin"
 #define AUTH_PASSWORD "CHANGE_ME_NOW"  // MUST be changed!
+
+// Build-time check for default password (compile warning)
+#if defined(SECURITY_ENABLED) && SECURITY_ENABLED == 1
+  #if !defined(AUTH_PASSWORD) || (defined(AUTH_PASSWORD) && strcmp(AUTH_PASSWORD, "CHANGE_ME_NOW") == 0)
+    #warning "*** SECURITY WARNING: Default password detected! Change AUTH_PASSWORD before deployment ***"
+  #endif
+#endif
+
 #define MAX_UPLOAD_SIZE (5 * 1024 * 1024)  // 5MB max upload
 #define MAX_JSON_SIZE 8192  // 8KB max JSON payload
+
+// CORS Configuration
+// WARNING: Default allows all origins (*). For production, change to specific domain:
+// #define CORS_ALLOW_ORIGIN "https://yourdomain.com"
+#define CORS_ALLOW_ORIGIN "*"  // CHANGE IN PRODUCTION!
 
 // Rate limiting (simple time-based)
 static unsigned long g_last_auth_fail = 0;
@@ -1576,15 +1589,22 @@ uint8_t currentWombatAddress = 0x6C;
 /**
  * Add security headers to HTTP response
  * Implements: CORS, CSP, X-Frame-Options, X-Content-Type-Options
+ * 
+ * Notes:
+ * - HSTS is included but only effective over HTTPS (not yet implemented)
+ * - CSP uses 'unsafe-inline' due to embedded HTML with inline scripts
+ * - CORS uses wildcard by default - CHANGE CORS_ALLOW_ORIGIN for production
  */
 static void addSecurityHeaders() {
   server.sendHeader("X-Content-Type-Options", "nosniff");
   server.sendHeader("X-Frame-Options", "DENY");
   server.sendHeader("X-XSS-Protection", "1; mode=block");
+  // CSP: 'unsafe-inline' required for embedded HTML, consider external JS in future
   server.sendHeader("Content-Security-Policy", "default-src 'self' 'unsafe-inline'; img-src 'self' data:;");
+  // HSTS: Only effective over HTTPS, included for future HTTPS implementation
   server.sendHeader("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
-  // CORS - restrict in production
-  server.sendHeader("Access-Control-Allow-Origin", "*");
+  // CORS - PRODUCTION WARNING: Change CORS_ALLOW_ORIGIN to specific domain
+  server.sendHeader("Access-Control-Allow-Origin", CORS_ALLOW_ORIGIN);
   server.sendHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
   server.sendHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
 }

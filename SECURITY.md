@@ -170,7 +170,21 @@ Located at top of `.ino` file:
 #define AUTH_PASSWORD "CHANGE_ME_NOW" // HTTP auth password (CHANGE THIS!)
 #define MAX_UPLOAD_SIZE (5 * 1024 * 1024)  // 5MB max upload
 #define MAX_JSON_SIZE 8192           // 8KB max JSON
+
+// CORS Configuration (CHANGE FOR PRODUCTION!)
+#define CORS_ALLOW_ORIGIN "*"        // Change to "https://yourdomain.com"
 ```
+
+**IMPORTANT:** The build system will emit a compile-time warning if the default password is detected.
+
+### Production Configuration Checklist
+
+Before deploying to production:
+
+1. **Change `AUTH_PASSWORD`** to a strong, unique password
+2. **Change `CORS_ALLOW_ORIGIN`** from `*` to your specific domain
+3. Verify compile warnings are addressed
+4. Test authentication on all endpoints
 
 ### Disabling Security (NOT RECOMMENDED)
 
@@ -217,7 +231,20 @@ Example strong password: `Womb@t2024!Secur3`
 3. **HTTP Basic Auth**: Credentials sent base64 encoded (use HTTPS in production)
 4. **Simple Rate Limiting**: Basic lockout mechanism (not persistent across reboots)
 5. **No Session Management**: Authentication required on each request
-6. **CORS Wide Open**: Default allows all origins (configure for production)
+6. **CORS Wide Open**: Default allows all origins - **MUST configure CORS_ALLOW_ORIGIN for production**
+7. **CSP 'unsafe-inline'**: Required for embedded HTML with inline scripts (reduces XSS protection)
+8. **HSTS over HTTP**: Header included for future HTTPS support but not currently effective
+9. **Compile-time Password**: Changing password requires recompilation and re-flash
+
+### Security Trade-offs
+
+**CSP 'unsafe-inline'**: The firmware includes HTML pages with inline JavaScript. While this weakens XSS protection, it's necessary for the embedded web interface. Future enhancement: move to external JavaScript files.
+
+**HSTS over HTTP**: The Strict-Transport-Security header is included in preparation for HTTPS support but is not currently effective since the firmware uses HTTP. This doesn't cause harm but also doesn't provide the security benefit until HTTPS is implemented.
+
+**CORS Wildcard**: The default `Access-Control-Allow-Origin: *` allows any domain to make requests. **This is a development convenience and MUST be changed to a specific domain in production environments.**
+
+**Default Password**: While a compile-time warning is emitted, the code will still compile with the default password. Users MUST manually change it before deployment.
 
 ### Future Enhancements
 
