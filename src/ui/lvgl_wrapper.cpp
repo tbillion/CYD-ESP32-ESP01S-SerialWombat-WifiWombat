@@ -141,6 +141,9 @@ void lvglTickAndUpdate() {
   if (now - last < 500) return;
   last = now;
 
+  // Update message badge
+  updateMessageBadge();
+
   // Time (best effort)
   if (g_lbl_time) {
     time_t t = time(nullptr);
