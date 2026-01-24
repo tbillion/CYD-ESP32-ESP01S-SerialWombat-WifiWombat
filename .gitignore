@@ -1,0 +1,57 @@
+# PlatformIO
+.pio/
+.vscode/
+.pioenvs/
+.piolibdeps/
+.clang_complete
+.gcc-flags.json
+*.pyc
+
+# Build artifacts
+*.bin
+*.elf
+*.map
+*.hex
+firmware.bin
+firmware.elf
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Logs
+*.log
+
+# Temporary files
+/temp/
+/tmp/
+
+# Secrets (if any .env files are added)
+.env
+.env.local
+secrets.h
+credentials.h
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Arduino IDE
+*.ino.cpp
+*.ino.elf
+
+# Test artifacts
+test_results/
+coverage/
+
+# Dependency directories
+node_modules/
+vendor/
+
+# Documentation build
+docs/_build/
+docs/.doctrees/
