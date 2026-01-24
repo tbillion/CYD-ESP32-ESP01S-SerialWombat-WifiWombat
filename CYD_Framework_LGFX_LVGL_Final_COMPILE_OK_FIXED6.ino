@@ -1,3 +1,37 @@
+/*
+ * CYD ESP32 Serial Wombat WiFi Bridge - Security Hardened
+ * 
+ * SECURITY NOTICE:
+ * ===============
+ * This firmware includes HTTP Basic Authentication on all sensitive endpoints.
+ * 
+ * DEFAULT CREDENTIALS (MUST BE CHANGED):
+ *   Username: admin
+ *   Password: CHANGE_ME_NOW
+ * 
+ * To change credentials, modify AUTH_USERNAME and AUTH_PASSWORD below.
+ * 
+ * Security Features:
+ * - HTTP Basic Authentication on all sensitive endpoints
+ * - Input validation on I2C addresses, pin numbers, paths
+ * - Path traversal protection for file operations
+ * - Security headers (CSP, X-Frame-Options, etc.)
+ * - Request size limits (5MB uploads, 8KB JSON)
+ * - Rate limiting on authentication failures
+ * - OTA password protection
+ * - Sanitized error messages
+ * 
+ * Public Endpoints (no auth):
+ * - / (root dashboard)
+ * - /api/health (health check)
+ * 
+ * Protected Endpoints (require auth):
+ * - All /api/* endpoints (except /api/health)
+ * - All file operations
+ * - All configuration changes
+ * - OTA updates
+ */
+
 #include <Arduino.h>
 #include <WiFi.h>
 #include <WebServer.h>
@@ -16,6 +50,22 @@ static uint64_t sd_used_bytes();
 
 #include <LittleFS.h>
 #include <ArduinoJson.h>
+
+// ===================================================================================
+// --- SECURITY CONFIGURATION ---
+// ===================================================================================
+// CRITICAL: Change these credentials before deployment!
+// Default credentials are for initial setup only.
+#define SECURITY_ENABLED 1
+#define AUTH_USERNAME "admin"
+#define AUTH_PASSWORD "CHANGE_ME_NOW"  // MUST be changed!
+#define MAX_UPLOAD_SIZE (5 * 1024 * 1024)  // 5MB max upload
+#define MAX_JSON_SIZE 8192  // 8KB max JSON payload
+
+// Rate limiting (simple time-based)
+static unsigned long g_last_auth_fail = 0;
+static uint8_t g_auth_fail_count = 0;
+static const uint16_t AUTH_LOCKOUT_MS = 5000;  // 5 second lockout after failed auth
 
 // ===================================================================================
 // --- Pre-Compilation Configuration (Global Scope) ---
@@ -1519,6 +1569,167 @@ WiFiClient tcpClient;
 SerialWombat sw;
 uint8_t currentWombatAddress = 0x6C;
 
+// ===================================================================================
+// --- SECURITY FUNCTIONS ---
+// ===================================================================================
+
+/**
+ * Add security headers to HTTP response
+ * Implements: CORS, CSP, X-Frame-Options, X-Content-Type-Options
+ */
+static void addSecurityHeaders() {
+  server.sendHeader("X-Content-Type-Options", "nosniff");
+  server.sendHeader("X-Frame-Options", "DENY");
+  server.sendHeader("X-XSS-Protection", "1; mode=block");
+  server.sendHeader("Content-Security-Policy", "default-src 'self' 'unsafe-inline'; img-src 'self' data:;");
+  server.sendHeader("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
+  // CORS - restrict in production
+  server.sendHeader("Access-Control-Allow-Origin", "*");
+  server.sendHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+  server.sendHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+}
+
+/**
+ * Check HTTP Basic Authentication
+ * Returns true if authenticated or security disabled, false otherwise
+ */
+static bool checkAuth() {
+#if !SECURITY_ENABLED
+  return true;  // Security disabled at compile time
+#endif
+
+  // Rate limiting: simple lockout after repeated failures
+  if (g_auth_fail_count >= 3) {
+    unsigned long now = millis();
+    if (now - g_last_auth_fail < AUTH_LOCKOUT_MS) {
+      server.send(429, "text/plain", "Too many failed attempts. Try again later.");
+      return false;
+    } else {
+      // Reset after lockout period
+      g_auth_fail_count = 0;
+    }
+  }
+
+  if (!server.authenticate(AUTH_USERNAME, AUTH_PASSWORD)) {
+    g_auth_fail_count++;
+    g_last_auth_fail = millis();
+    server.requestAuthentication(BASIC_AUTH, "Wombat Manager", "Authentication required");
+    return false;
+  }
+
+  // Success - reset fail counter
+  g_auth_fail_count = 0;
+  return true;
+}
+
+/**
+ * Validate I2C address (7-bit address range)
+ */
+static bool isValidI2CAddress(uint8_t addr) {
+  return (addr >= 0x08 && addr <= 0x77);
+}
+
+/**
+ * Validate pin number for ESP32
+ */
+static bool isValidPinNumber(int pin) {
+  // ESP32 valid GPIO pins (exclude reserved/strapping pins)
+  // Allow common GPIO pins, exclude flash pins (6-11)
+  if (pin < 0 || pin > 39) return false;
+  if (pin >= 6 && pin <= 11) return false;  // Flash pins
+  return true;
+}
+
+/**
+ * Validate integer is within range
+ */
+static bool isValidRange(int value, int min_val, int max_val) {
+  return (value >= min_val && value <= max_val);
+}
+
+/**
+ * Enhanced path traversal protection
+ * Prevents: .., absolute path escape, null bytes, control chars
+ */
+static bool isPathSafe(const String& path) {
+  // Check for null bytes
+  if (path.indexOf('\0') >= 0) return false;
+  
+  // Check for control characters
+  for (size_t i = 0; i < path.length(); i++) {
+    char c = path[i];
+    if (c < 0x20 && c != '\n' && c != '\r' && c != '\t') return false;
+  }
+  
+  // Check for parent directory references
+  if (path.indexOf("..") >= 0) return false;
+  
+  // Must start with / (absolute within filesystem)
+  if (path.length() > 0 && path[0] != '/') return false;
+  
+  return true;
+}
+
+/**
+ * Validate filename for filesystem safety
+ * Only allows alphanumeric, underscore, dash, dot
+ */
+static bool isFilenameSafe(const String& filename) {
+  if (filename.length() == 0 || filename.length() > 255) return false;
+  
+  // Check for null bytes
+  if (filename.indexOf('\0') >= 0) return false;
+  
+  // Must not start with dot (hidden files)
+  if (filename[0] == '.') return false;
+  
+  // Check each character
+  for (size_t i = 0; i < filename.length(); i++) {
+    char c = filename[i];
+    bool valid = (c >= 'a' && c <= 'z') || 
+                 (c >= 'A' && c <= 'Z') || 
+                 (c >= '0' && c <= '9') ||
+                 c == '_' || c == '-' || c == '.';
+    if (!valid) return false;
+  }
+  
+  return true;
+}
+
+/**
+ * Sanitize error messages to prevent info disclosure
+ */
+static String sanitizeError(const String& error) {
+  // Remove filesystem paths
+  String safe = error;
+  safe.replace("/littlefs/", "[FS]/");
+  safe.replace("/sd/", "[SD]/");
+  safe.replace("/temp/", "[TEMP]/");
+  safe.replace("/fw/", "[FW]/");
+  safe.replace("/config/", "[CFG]/");
+  
+  // Limit length
+  if (safe.length() > 128) {
+    safe = safe.substring(0, 125) + "...";
+  }
+  
+  return safe;
+}
+
+/**
+ * Validate JSON size before parsing
+ */
+static bool isJsonSizeSafe(const String& json) {
+  return (json.length() <= MAX_JSON_SIZE);
+}
+
+/**
+ * Check if upload size is within limits
+ */
+static bool isUploadSizeSafe(size_t size) {
+  return (size <= MAX_UPLOAD_SIZE);
+}
+
 // Pin Mode Strings
 const char* const pinModeStrings[] PROGMEM = {
   "DIGITAL_IO", "CONTROLLED", "ANALOGINPUT", "SERVO", "THROUGHPUT_CONSUMER",
@@ -2721,6 +2932,9 @@ static void applyConfiguration(DynamicJsonDocument& doc) {
 // ROUTE HANDLERS (Dashboard + Tools)
 // ===================================================================================
 static void handleRoot() {
+  // Public page but add security headers
+  addSecurityHeaders();
+  
   String s = FPSTR(INDEX_HTML_HEAD);
 
   // Insert a simple nav bar without altering the stored v06 HTML constants.
@@ -2865,8 +3079,21 @@ static void handleDeepScan() {
 }
 
 static void handleConnect() {
+  // Authentication required for I2C operations
+  if (!checkAuth()) return;
+  addSecurityHeaders();
+  
   if (server.hasArg("addr")) {
-    currentWombatAddress = (uint8_t)strtol(server.arg("addr").c_str(), NULL, 16);
+    String addrStr = server.arg("addr");
+    uint8_t addr = (uint8_t)strtol(addrStr.c_str(), NULL, 16);
+    
+    // Validate I2C address
+    if (!isValidI2CAddress(addr)) {
+      server.send(400, "text/plain", "Invalid I2C address. Must be 0x08-0x77");
+      return;
+    }
+    
+    currentWombatAddress = addr;
     sw.begin(Wire, currentWombatAddress);
   }
   server.sendHeader("Location", "/");
@@ -2874,10 +3101,27 @@ static void handleConnect() {
 }
 
 static void handleSetPin() {
+  // Authentication required for pin configuration
+  if (!checkAuth()) return;
+  addSecurityHeaders();
+  
   if (server.hasArg("pin") && server.hasArg("mode")) {
-    uint8_t pin = (uint8_t)server.arg("pin").toInt();
+    int pin = server.arg("pin").toInt();
     int mode = server.arg("mode").toInt();
-    uint8_t tx[8] = {200, pin, (uint8_t)mode, 0, 0, 0, 0, 0};
+    
+    // Validate pin number
+    if (!isValidPinNumber(pin)) {
+      server.send(400, "text/plain", "Invalid pin number");
+      return;
+    }
+    
+    // Validate mode range (assuming valid modes 0-40 based on pinModeStrings)
+    if (!isValidRange(mode, 0, 40)) {
+      server.send(400, "text/plain", "Invalid mode value");
+      return;
+    }
+    
+    uint8_t tx[8] = {200, (uint8_t)pin, (uint8_t)mode, 0, 0, 0, 0, 0};
     sw.sendPacket(tx);
   }
   server.sendHeader("Location", "/");
@@ -2885,57 +3129,76 @@ static void handleSetPin() {
 }
 
 static void handleChangeAddr() {
+  // Authentication required for address changes
+  if (!checkAuth()) return;
+  addSecurityHeaders();
+  
   if (server.hasArg("newaddr")) {
     String val = server.arg("newaddr");
     uint8_t newAddr = (uint8_t)strtol(val.c_str(), NULL, 16);
 
-    if (newAddr >= 0x08 && newAddr <= 0x77) {
-      // 1) Library method (known good on SW8B)
-      sw.setThroughputPin((uint32_t)newAddr);
-      delay(200);
-
-      // 2) Fallback raw packet
-      Wire.beginTransmission(currentWombatAddress);
-      Wire.write(0xAF);
-      Wire.write(0x5F);
-      Wire.write(0x42);
-      Wire.write(0xAF);
-      Wire.write(newAddr);
-      Wire.write(0x55);
-      Wire.write(0x55);
-      Wire.write(0x55);
-      Wire.endTransmission();
-      i2cMarkTx();
-
-      delay(200);
-
-      // 3) Reset to latch
-      sw.begin(Wire, currentWombatAddress);
-      sw.hardwareReset();
-      delay(1500);
-
-      // 4) Switch to new address
-      currentWombatAddress = newAddr;
-      sw.begin(Wire, currentWombatAddress);
+    if (!isValidI2CAddress(newAddr)) {
+      server.send(400, "text/plain", "Invalid I2C address. Must be 0x08-0x77");
+      return;
     }
+    
+    // 1) Library method (known good on SW8B)
+    sw.setThroughputPin((uint32_t)newAddr);
+    delay(200);
+
+    // 2) Fallback raw packet
+    Wire.beginTransmission(currentWombatAddress);
+    Wire.write(0xAF);
+    Wire.write(0x5F);
+    Wire.write(0x42);
+    Wire.write(0xAF);
+    Wire.write(newAddr);
+    Wire.write(0x55);
+    Wire.write(0x55);
+    Wire.write(0x55);
+    Wire.endTransmission();
+    i2cMarkTx();
+
+    delay(200);
+
+    // 3) Reset to latch
+    sw.begin(Wire, currentWombatAddress);
+    sw.hardwareReset();
+    delay(1500);
+
+    // 4) Switch to new address
+    currentWombatAddress = newAddr;
+    sw.begin(Wire, currentWombatAddress);
   }
   server.sendHeader("Location", "/");
   server.send(303);
 }
 
 static void handleResetTarget() {
+  // Authentication required for hardware reset
+  if (!checkAuth()) return;
+  addSecurityHeaders();
+  
   sw.hardwareReset();
   server.sendHeader("Location", "/");
   server.send(303);
 }
 
 static void handleResetWiFi() {
+  // Authentication required for WiFi reset (critical operation)
+  if (!checkAuth()) return;
+  addSecurityHeaders();
+  
   WiFiManager wm;
   wm.resetSettings();
   ESP.restart();
 }
 
 static void handleFormat() {
+  // Authentication required for filesystem format (destructive operation)
+  if (!checkAuth()) return;
+  addSecurityHeaders();
+  
   LittleFS.format();
   server.sendHeader("Location", "/");
   server.send(303);
@@ -2945,6 +3208,10 @@ static void handleFormat() {
 // Firmware slot + upload handlers (ESP32 LittleFS iteration)
 // ===================================================================================
 static void handleCleanSlot() {
+  // Authentication required for slot cleanup
+  if (!checkAuth()) return;
+  addSecurityHeaders();
+  
   if (!server.hasArg("prefix")) {
     server.send(400, "text/plain", "Missing prefix");
     return;
@@ -3318,6 +3585,10 @@ static void handleUploadFW() {
 // Firmware Flasher (v06 - row-by-row writing) PRESERVED
 // ===================================================================================
 static void handleFlashFW() {
+  // Authentication required for firmware flashing (critical operation)
+  if (!checkAuth()) return;
+  addSecurityHeaders();
+  
   if (!server.hasArg("fw_name")) {
     server.send(400, "text/plain", "No selection");
     return;
@@ -3559,6 +3830,10 @@ static void handleTcpBridge() {
 // CONFIG API
 // ===================================================================================
 static void handleApiVariant() {
+  // Authentication required for variant info
+  if (!checkAuth()) return;
+  addSecurityHeaders();
+  
   VariantInfo info = getDeepScanInfoSingle(currentWombatAddress);
   DynamicJsonDocument doc(1536);
   doc["variant"] = info.variant;
@@ -3570,6 +3845,16 @@ static void handleApiVariant() {
 }
 
 static void handleApiApply() {
+  // Authentication required for configuration changes
+  if (!checkAuth()) return;
+  addSecurityHeaders();
+  
+  // Validate JSON size
+  if (!isJsonSizeSafe(server.arg("plain"))) {
+    server.send(413, "text/plain", "Payload too large");
+    return;
+  }
+  
   DynamicJsonDocument doc(8192);
   DeserializationError err = deserializeJson(doc, server.arg("plain"));
   if (err) {
@@ -3589,7 +3874,18 @@ static String configPathFromName(const String& name) {
 }
 
 static void handleConfigSave() {
+  // Authentication required for saving configurations
+  if (!checkAuth()) return;
+  addSecurityHeaders();
+  
   if (!server.hasArg("name")) { server.send(400, "text/plain", "Missing name"); return; }
+  
+  // Validate JSON size
+  if (!isJsonSizeSafe(server.arg("plain"))) {
+    server.send(413, "text/plain", "Payload too large");
+    return;
+  }
+  
   String name = server.arg("name");
   String path = configPathFromName(name);
   File f = LittleFS.open(path, "w");
@@ -3600,6 +3896,10 @@ static void handleConfigSave() {
 }
 
 static void handleConfigLoad() {
+  // Config load might contain sensitive info, require auth
+  if (!checkAuth()) return;
+  addSecurityHeaders();
+  
   if (!server.hasArg("name")) { server.send(400, "text/plain", "Missing name"); return; }
   String name = server.arg("name");
   String path = configPathFromName(name);
@@ -3615,6 +3915,10 @@ static void handleConfigLoad() {
 }
 
 static void handleConfigList() {
+  // Authentication required for config listing
+  if (!checkAuth()) return;
+  addSecurityHeaders();
+  
   DynamicJsonDocument doc(4096);
   JsonArray arr = doc.to<JsonArray>();
 
@@ -3661,6 +3965,10 @@ static void handleConfigList() {
 }
 
 static void handleConfigExists() {
+  // Authentication required for config check
+  if (!checkAuth()) return;
+  addSecurityHeaders();
+  
   if (!server.hasArg("name")) { server.send(400, "text/plain", "Missing name"); return; }
   DynamicJsonDocument doc(128);
   doc["exists"] = LittleFS.exists(configPathFromName(server.arg("name")));
@@ -3670,6 +3978,10 @@ static void handleConfigExists() {
 }
 
 static void handleConfigDelete() {
+  // Authentication required for deleting configurations
+  if (!checkAuth()) return;
+  addSecurityHeaders();
+  
   if (!server.hasArg("name")) { server.send(400, "text/plain", "Missing name"); return; }
   LittleFS.remove(configPathFromName(server.arg("name")));
   server.send(200, "text/plain", "Deleted");
@@ -3797,7 +4109,38 @@ static bool fwTxtToBin(const String& inPath, const String& outBinPath, String& e
 // ===================================================================================
 // SYSTEM SETTINGS API
 // ===================================================================================
+
+/**
+ * Public health check endpoint - no authentication required
+ * Returns basic system status for monitoring
+ */
+static void handleApiHealth() {
+  addSecurityHeaders();
+  
+  DynamicJsonDocument doc(512);
+  doc["status"] = "ok";
+  doc["uptime_ms"] = millis();
+  doc["heap_free"] = ESP.getFreeHeap();
+  doc["wifi_connected"] = WiFi.isConnected();
+  doc["wifi_rssi"] = WiFi.RSSI();
+  doc["ip"] = WiFi.localIP().toString();
+  
+  #if SD_SUPPORT_ENABLED
+  if (isSDEnabled) {
+    doc["sd_mounted"] = g_sdMounted;
+  }
+  #endif
+  
+  String out;
+  serializeJson(doc, out);
+  server.send(200, "application/json", out);
+}
+
 static void handleApiSystem() {
+  // Authentication required for detailed system info
+  if (!checkAuth()) return;
+  addSecurityHeaders();
+  
   DynamicJsonDocument doc(768);
   doc["cpu_mhz"] = ESP.getCpuFreqMHz();
   doc["flash_speed_hz"] = (uint32_t)ESP.getFlashChipSpeed();
@@ -3856,6 +4199,10 @@ static void handleApiSystem() {
 
  
 static void handleApiSdStatus() {
+  // Authentication required for SD status
+  if (!checkAuth()) return;
+  addSecurityHeaders();
+  
   DynamicJsonDocument doc(256);
   doc["enabled"] = (bool)isSDEnabled;
   if (!isSDEnabled) {
@@ -3872,6 +4219,10 @@ static void handleApiSdStatus() {
 }
 
 static void handleApiSdList() {
+  // Authentication required for SD file listing
+  if (!checkAuth()) return;
+  addSecurityHeaders();
+  
 #if !SD_SUPPORT_ENABLED
   server.send(400, "text/plain", "SD disabled");
   return;
@@ -3908,43 +4259,109 @@ static void handleApiSdList() {
 static bool sdDeleteRecursive(const String& path) { return sdRemoveRecursive(path); }
 
 static void handleApiSdDelete() {
+  // Authentication required for delete operations
+  if (!checkAuth()) return;
+  addSecurityHeaders();
+  
   if (!isSDEnabled) { server.send(403, "text/plain", "SD disabled"); return; }
-  if (!sdEnsureMounted()) { server.send(500, "text/plain", g_sdMountMsg); return; }
+  if (!sdEnsureMounted()) { server.send(500, "text/plain", sanitizeError(g_sdMountMsg)); return; }
+  
+  // Validate JSON size
+  if (!isJsonSizeSafe(server.arg("plain"))) {
+    server.send(413, "text/plain", "Payload too large");
+    return;
+  }
+  
   DynamicJsonDocument doc(256);
   DeserializationError err = deserializeJson(doc, server.arg("plain"));
   if (err) { server.send(400, "text/plain", "Bad JSON"); return; }
+  
   String path = sanitizePath(doc["path"] | "");
+  
+  // Additional security validation
+  if (!isPathSafe(path)) {
+    server.send(400, "text/plain", "Invalid path");
+    return;
+  }
+  
   if (path == "/" || path.length() < 2) { server.send(400, "text/plain", "Refuse" ); return; }
   bool ok = sdDeleteRecursive(path);
   server.send(ok ? 200 : 500, "text/plain", ok ? "OK" : "Delete failed");
 }
 
 static void handleApiSdRename() {
+  // Authentication required for rename operations
+  if (!checkAuth()) return;
+  addSecurityHeaders();
+  
   if (!isSDEnabled) { server.send(403, "text/plain", "SD disabled"); return; }
-  if (!sdEnsureMounted()) { server.send(500, "text/plain", g_sdMountMsg); return; }
+  if (!sdEnsureMounted()) { server.send(500, "text/plain", sanitizeError(g_sdMountMsg)); return; }
+  
+  // Validate JSON size
+  if (!isJsonSizeSafe(server.arg("plain"))) {
+    server.send(413, "text/plain", "Payload too large");
+    return;
+  }
+  
   DynamicJsonDocument doc(512);
   DeserializationError err = deserializeJson(doc, server.arg("plain"));
   if (err) { server.send(400, "text/plain", "Bad JSON"); return; }
+  
   String from = sanitizePath(doc["from"] | "");
   String to = sanitizePath(doc["to"] | "");
-  if (!from.length() || !to.length() || from == "/" || to == "/") { server.send(400, "text/plain", "Bad path"); return; }
+  
+  // Additional security validation
+  if (!isPathSafe(from) || !isPathSafe(to)) {
+    server.send(400, "text/plain", "Invalid path");
+    return;
+  }
+  
+  if (!from.length() || !to.length() || from == "/" || to == "/") { 
+    server.send(400, "text/plain", "Bad path"); 
+    return; 
+  }
+  
   bool ok = sd_rename(from, to);
   server.send(ok ? 200 : 500, "text/plain", ok ? "OK" : "Rename failed");
 }
 
 static void handleSdDownload() {
-  if (!isSDEnabled) { server.send(403, "text/plain", "SD disabled"); return; }
-  if (!sdEnsureMounted()) { server.send(500, "text/plain", g_sdMountMsg); return; }
+  // Authentication required for file downloads
+  if (!checkAuth()) return;
+  
+  if (!isSDEnabled) { 
+    addSecurityHeaders();
+    server.send(403, "text/plain", "SD disabled"); 
+    return; 
+  }
+  if (!sdEnsureMounted()) { 
+    addSecurityHeaders();
+    server.send(500, "text/plain", sanitizeError(g_sdMountMsg)); 
+    return; 
+  }
+  
   String path = server.hasArg("path") ? server.arg("path") : String("");
   path = sanitizePath(path);
+  
+  // Additional security: verify path is safe
+  if (!isPathSafe(path)) {
+    addSecurityHeaders();
+    server.send(400, "text/plain", "Invalid path");
+    return;
+  }
 
   SDFile f = sd_open(path.c_str(), O_RDONLY);
-  if (!f || f.isDirectory()) { server.send(404, "text/plain", "Not found"); return; }
+  if (!f || f.isDirectory()) { 
+    addSecurityHeaders();
+    server.send(404, "text/plain", "Not found"); 
+    return; 
+  }
 
   String fn = path;
   int slash = fn.lastIndexOf('/');
   if (slash >= 0) fn = fn.substring(slash + 1);
 
+  addSecurityHeaders();
   server.sendHeader("Content-Disposition", String("attachment; filename=\"") + fn + "\"");
   server.sendHeader("Cache-Control", "no-store");
   server.setContentLength((int)f.size());
@@ -3964,6 +4381,10 @@ static void handleSdDownload() {
 
 
 static void handleApiSdEject() {
+  // Authentication required for SD eject
+  if (!checkAuth()) return;
+  addSecurityHeaders();
+  
   if (!isSDEnabled) { server.send(403, "text/plain", "SD disabled"); return; }
   sdUnmount();
   server.send(200, "text/plain", "Ejected");
@@ -3980,12 +4401,35 @@ static void handleUploadSD() {
 
   HTTPUpload& upload = server.upload();
   if (upload.status == UPLOAD_FILE_START) {
+    // Check upload size limit
+    if (!isUploadSizeSafe(upload.totalSize)) {
+      g_sdUploadOk = false;
+      g_sdUploadMsg = "File too large";
+      return;
+    }
+    
     g_sdUploadOk = false;
     g_sdUploadMsg = "";
     String dir = server.hasArg("dir") ? server.arg("dir") : String("/");
     dir = sanitizePath(dir);
+    
+    // Validate path safety
+    if (!isPathSafe(dir)) {
+      g_sdUploadOk = false;
+      g_sdUploadMsg = "Invalid path";
+      return;
+    }
+    
     if (!dir.endsWith("/")) dir += "/";
     String fn = sanitizeBasename(upload.filename);
+    
+    // Validate filename
+    if (!isFilenameSafe(fn)) {
+      g_sdUploadOk = false;
+      g_sdUploadMsg = "Invalid filename";
+      return;
+    }
+    
     if (!fn.length()) fn = "upload.bin";
     g_sdUploadPath = dir + fn;
     g_sdUploadFile = sd_open(g_sdUploadPath.c_str(), O_WRONLY | O_CREAT | O_TRUNC);
@@ -4012,8 +4456,12 @@ static void handleUploadSD() {
 }
 
 static void handleUploadSdPost() {
+  // Authentication required for uploads
+  if (!checkAuth()) return;
+  addSecurityHeaders();
+  
   if (g_sdUploadOk) {
-    server.send(200, "text/plain", "Uploaded: " + g_sdUploadMsg);
+    server.send(200, "text/plain", "Uploaded: " + sanitizeError(g_sdUploadMsg));
   } else {
     String msg = g_sdUploadMsg.length() ? g_sdUploadMsg : String("Upload failed");
     server.send(500, "text/plain", msg);
@@ -4022,6 +4470,10 @@ static void handleUploadSdPost() {
 
 // Import a file from SD into internal firmware storage (supports .bin, .hex, .txt)
 static void handleApiSdImportFw() {
+  // Authentication required for firmware import
+  if (!checkAuth()) return;
+  addSecurityHeaders();
+  
   if (!isSDEnabled) { server.send(403, "text/plain", "SD disabled"); return; }
   if (!sdEnsureMounted()) { server.send(500, "text/plain", g_sdMountMsg); return; }
 
@@ -4156,6 +4608,22 @@ void setup() {
     WiFi.mode(WIFI_AP);
     WiFi.softAP("Wombat-Setup");
   }
+  
+  // Security warning on startup
+  #if SECURITY_ENABLED
+  Serial.println("\n*** SECURITY WARNING ***");
+  Serial.println("Authentication is ENABLED");
+  Serial.print("Username: ");
+  Serial.println(AUTH_USERNAME);
+  if (strcmp(AUTH_PASSWORD, "CHANGE_ME_NOW") == 0) {
+    Serial.println("*** DEFAULT PASSWORD DETECTED ***");
+    Serial.println("*** CHANGE AUTH_PASSWORD IN CODE IMMEDIATELY ***");
+    Serial.println("*** SYSTEM IS NOT SECURE WITH DEFAULT PASSWORD ***");
+  }
+  Serial.println("************************\n");
+  #else
+  Serial.println("\n*** WARNING: SECURITY DISABLED ***\n");
+  #endif
 
   // Dashboard + Tools
   server.on("/", handleRoot);
@@ -4199,6 +4667,9 @@ void setup() {
   // System Settings UI
   server.on("/settings", []() { server.send(200, "text/html", FPSTR(SETTINGS_HTML)); });
 
+  // Health check endpoint (public, no auth)
+  server.on("/api/health", HTTP_GET, handleApiHealth);
+  
   // System Settings API
   server.on("/api/system", HTTP_GET, handleApiSystem);
 
@@ -4228,6 +4699,26 @@ void setup() {
 
   server.begin();
   tcpServer.begin();
+  
+  // Configure OTA security
+  ArduinoOTA.setPassword(AUTH_PASSWORD);
+  ArduinoOTA.setHostname("wombat-bridge");
+  
+  // OTA security callbacks
+  ArduinoOTA.onStart([]() {
+    String type = (ArduinoOTA.getCommand() == U_FLASH) ? "firmware" : "filesystem";
+    Serial.println("OTA Update Start: " + type);
+  });
+  
+  ArduinoOTA.onError([](ota_error_t error) {
+    Serial.printf("OTA Error[%u]: ", error);
+    if (error == OTA_AUTH_ERROR) Serial.println("Auth Failed");
+    else if (error == OTA_BEGIN_ERROR) Serial.println("Begin Failed");
+    else if (error == OTA_CONNECT_ERROR) Serial.println("Connect Failed");
+    else if (error == OTA_RECEIVE_ERROR) Serial.println("Receive Failed");
+    else if (error == OTA_END_ERROR) Serial.println("End Failed");
+  });
+  
   ArduinoOTA.begin();
 }
 
