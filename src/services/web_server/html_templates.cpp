@@ -823,3 +823,250 @@ const char SETTINGS_HTML[] PROGMEM = R"rawliteral(
   </script>
 </body></html>
 )rawliteral";
+
+// ===================================================================================
+// MESSAGES PAGE HTML
+// ===================================================================================
+const char MESSAGES_HTML[] PROGMEM = R"rawliteral(
+<!DOCTYPE html>
+<html><head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>System Messages</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 20px; background: #f5f5f5; }
+    .container { max-width: 1200px; margin: 0 auto; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+    h1 { color: #333; margin-bottom: 10px; }
+    .nav { margin-bottom: 20px; }
+    .nav a { color: #007bff; text-decoration: none; margin-right: 15px; }
+    .nav a:hover { text-decoration: underline; }
+    .tabs { display: flex; gap: 10px; margin-bottom: 20px; border-bottom: 2px solid #ddd; }
+    .tab { padding: 10px 20px; cursor: pointer; background: #f8f9fa; border: 1px solid #ddd; border-bottom: none; border-radius: 4px 4px 0 0; }
+    .tab.active { background: white; border-bottom: 2px solid white; margin-bottom: -2px; font-weight: bold; }
+    .controls { margin-bottom: 20px; }
+    .btn { padding: 8px 16px; background: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer; margin-right: 10px; }
+    .btn:hover { background: #0056b3; }
+    .btn-danger { background: #dc3545; }
+    .btn-danger:hover { background: #c82333; }
+    .message-list { display: flex; flex-direction: column; gap: 10px; }
+    .message-item { padding: 15px; background: #f8f9fa; border-left: 4px solid #007bff; border-radius: 4px; cursor: pointer; }
+    .message-item:hover { background: #e9ecef; }
+    .message-item.INFO { border-left-color: #17a2b8; }
+    .message-item.WARN { border-left-color: #ffc107; }
+    .message-item.ERROR { border-left-color: #dc3545; }
+    .message-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px; }
+    .message-severity { font-weight: bold; padding: 2px 8px; border-radius: 3px; font-size: 12px; }
+    .severity-INFO { background: #d1ecf1; color: #0c5460; }
+    .severity-WARN { background: #fff3cd; color: #856404; }
+    .severity-ERROR { background: #f8d7da; color: #721c24; }
+    .message-title { font-size: 16px; font-weight: bold; margin-bottom: 5px; }
+    .message-meta { font-size: 12px; color: #666; }
+    .message-count { background: #6c757d; color: white; padding: 2px 6px; border-radius: 10px; font-size: 11px; }
+    .badge { position: relative; display: inline-block; padding: 4px 8px; background: #dc3545; color: white; border-radius: 12px; font-size: 12px; font-weight: bold; margin-left: 10px; }
+    .detail-view { display: none; position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: white; padding: 30px; border-radius: 8px; box-shadow: 0 4px 20px rgba(0,0,0,0.3); z-index: 1000; max-width: 600px; width: 90%; }
+    .detail-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 999; }
+    .detail-actions { margin-top: 20px; display: flex; gap: 10px; }
+    .empty-state { text-align: center; padding: 40px; color: #999; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>System Messages
+      <span id="badge" class="badge" style="display:none;">0</span>
+    </h1>
+    
+    <div class="nav">
+      <a href="/">← Back to Dashboard</a>
+      <a href="/scanner">Scanner</a>
+      <a href="/configure">Configure</a>
+      <a href="/settings">Settings</a>
+    </div>
+
+    <div class="tabs">
+      <div class="tab active" onclick="showTab('active')">Active Messages</div>
+      <div class="tab" onclick="showTab('history')">History</div>
+    </div>
+
+    <div class="controls" id="activeControls">
+      <button class="btn" onclick="ackAll()">Acknowledge All</button>
+      <button class="btn" onclick="refresh()">Refresh</button>
+    </div>
+
+    <div class="controls" id="historyControls" style="display:none;">
+      <button class="btn btn-danger" onclick="clearHistory()">Clear History</button>
+      <button class="btn" onclick="refresh()">Refresh</button>
+    </div>
+
+    <div id="activeMessages" class="message-list"></div>
+    <div id="historyMessages" class="message-list" style="display:none;"></div>
+  </div>
+
+  <div class="detail-overlay" id="detailOverlay" onclick="closeDetail()"></div>
+  <div class="detail-view" id="detailView">
+    <h2 id="detailTitle"></h2>
+    <p><strong>Severity:</strong> <span id="detailSeverity" class="message-severity"></span></p>
+    <p><strong>Source:</strong> <span id="detailSource"></span></p>
+    <p><strong>Code:</strong> <span id="detailCode"></span></p>
+    <p><strong>Timestamp:</strong> <span id="detailTimestamp"></span></p>
+    <p><strong>Occurrences:</strong> <span id="detailCount"></span></p>
+    <p><strong>Details:</strong></p>
+    <p id="detailDetails" style="background:#f8f9fa;padding:10px;border-radius:4px;"></p>
+    <div class="detail-actions">
+      <button class="btn" id="ackBtn" onclick="ackMessage()">Acknowledge</button>
+      <button class="btn" onclick="closeDetail()">Close</button>
+    </div>
+  </div>
+
+  <script>
+    let currentTab = 'active';
+    let currentMsgId = null;
+
+    function showTab(tab) {
+      currentTab = tab;
+      document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+      event.target.classList.add('active');
+      
+      if (tab === 'active') {
+        document.getElementById('activeControls').style.display = 'block';
+        document.getElementById('historyControls').style.display = 'none';
+        document.getElementById('activeMessages').style.display = 'flex';
+        document.getElementById('historyMessages').style.display = 'none';
+      } else {
+        document.getElementById('activeControls').style.display = 'none';
+        document.getElementById('historyControls').style.display = 'block';
+        document.getElementById('activeMessages').style.display = 'none';
+        document.getElementById('historyMessages').style.display = 'flex';
+      }
+      
+      refresh();
+    }
+
+    function formatTime(ms) {
+      const d = new Date(ms);
+      return d.toLocaleString();
+    }
+
+    function renderMessages(messages, containerId) {
+      const container = document.getElementById(containerId);
+      if (messages.length === 0) {
+        container.innerHTML = '<div class="empty-state">No messages</div>';
+        return;
+      }
+      
+      container.innerHTML = messages.map(msg => `
+        <div class="message-item ${msg.severity}" onclick="showDetail(${msg.id})">
+          <div class="message-header">
+            <span class="message-severity severity-${msg.severity}">${msg.severity}</span>
+            ${msg.count > 1 ? `<span class="message-count">${msg.count}x</span>` : ''}
+          </div>
+          <div class="message-title">${msg.title}</div>
+          <div class="message-meta">
+            ${msg.source} | ${msg.code} | ${formatTime(msg.timestamp)}
+          </div>
+        </div>
+      `).join('');
+    }
+
+    async function refresh() {
+      try {
+        // Update badge
+        const summary = await fetch('/api/messages/summary').then(r => r.json());
+        const badge = document.getElementById('badge');
+        if (summary.active_count > 0) {
+          badge.textContent = summary.active_count;
+          badge.style.display = 'inline-block';
+          badge.style.background = summary.highest_severity === 'ERROR' ? '#dc3545' : 
+                                   summary.highest_severity === 'WARN' ? '#ffc107' : '#17a2b8';
+        } else {
+          badge.style.display = 'none';
+        }
+        
+        // Update active messages
+        if (currentTab === 'active') {
+          const active = await fetch('/api/messages/active').then(r => r.json());
+          renderMessages(active, 'activeMessages');
+        } else {
+          const history = await fetch('/api/messages/history').then(r => r.json());
+          renderMessages(history, 'historyMessages');
+        }
+      } catch (e) {
+        console.error('Failed to refresh messages:', e);
+      }
+    }
+
+    function showDetail(msgId) {
+      fetch(`/api/messages/${currentTab}`)
+        .then(r => r.json())
+        .then(messages => {
+          const msg = messages.find(m => m.id === msgId);
+          if (!msg) return;
+          
+          currentMsgId = msgId;
+          document.getElementById('detailTitle').textContent = msg.title;
+          document.getElementById('detailSeverity').textContent = msg.severity;
+          document.getElementById('detailSeverity').className = 'message-severity severity-' + msg.severity;
+          document.getElementById('detailSource').textContent = msg.source;
+          document.getElementById('detailCode').textContent = msg.code;
+          document.getElementById('detailTimestamp').textContent = formatTime(msg.timestamp) + 
+            (msg.count > 1 ? ` (Last: ${formatTime(msg.last_ts)})` : '');
+          document.getElementById('detailCount').textContent = msg.count;
+          document.getElementById('detailDetails').textContent = msg.details || 'No additional details';
+          
+          document.getElementById('ackBtn').style.display = currentTab === 'active' ? 'inline-block' : 'none';
+          document.getElementById('detailOverlay').style.display = 'block';
+          document.getElementById('detailView').style.display = 'block';
+        });
+    }
+
+    function closeDetail() {
+      document.getElementById('detailOverlay').style.display = 'none';
+      document.getElementById('detailView').style.display = 'none';
+    }
+
+    async function ackMessage() {
+      try {
+        const resp = await fetch('/api/messages/ack', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ msg_id: currentMsgId })
+        });
+        const result = await resp.json();
+        if (result.success) {
+          closeDetail();
+          refresh();
+        } else {
+          alert('Failed to acknowledge message: ' + (result.error || 'Unknown error'));
+        }
+      } catch (e) {
+        alert('Error: ' + e);
+      }
+    }
+
+    async function ackAll() {
+      if (!confirm('Acknowledge all active messages?')) return;
+      try {
+        await fetch('/api/messages/ack_all', { method: 'POST' });
+        refresh();
+      } catch (e) {
+        alert('Error: ' + e);
+      }
+    }
+
+    async function clearHistory() {
+      if (!confirm('Clear all message history? This cannot be undone.')) return;
+      try {
+        await fetch('/api/messages/clear_history', { method: 'POST' });
+        refresh();
+      } catch (e) {
+        alert('Error: ' + e);
+      }
+    }
+
+    // Auto-refresh every 5 seconds
+    setInterval(refresh, 5000);
+    
+    // Initial load
+    refresh();
+  </script>
+</body></html>
+)rawliteral";

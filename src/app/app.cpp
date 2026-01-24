@@ -263,6 +263,29 @@ void App::initWebServer() {
   server.on("/formatfs", []() { handleFormat(App::getInstance().getWebServer()); });
 
   // ===================================================================================
+  // Messages UI and API
+  // ===================================================================================
+  server.on("/messages", []() { handleMessagesPage(App::getInstance().getWebServer()); });
+  server.on("/api/messages/summary", HTTP_GET, []() { 
+    handleApiMessagesSummary(App::getInstance().getWebServer()); 
+  });
+  server.on("/api/messages/active", HTTP_GET, []() { 
+    handleApiMessagesActive(App::getInstance().getWebServer()); 
+  });
+  server.on("/api/messages/history", HTTP_GET, []() { 
+    handleApiMessagesHistory(App::getInstance().getWebServer()); 
+  });
+  server.on("/api/messages/ack", HTTP_POST, []() { 
+    handleApiMessagesAck(App::getInstance().getWebServer()); 
+  });
+  server.on("/api/messages/ack_all", HTTP_POST, []() { 
+    handleApiMessagesAckAll(App::getInstance().getWebServer()); 
+  });
+  server.on("/api/messages/clear_history", HTTP_POST, []() { 
+    handleApiMessagesClearHistory(App::getInstance().getWebServer()); 
+  });
+
+  // ===================================================================================
   // Configurator UI
   // ===================================================================================
   server.on("/configure", []() { 

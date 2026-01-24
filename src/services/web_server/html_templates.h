@@ -11,3 +11,4 @@ extern const char SD_TILE_HTML[] PROGMEM;
 extern const char SCANNER_HTML[] PROGMEM;
 extern const char CONFIG_HTML[] PROGMEM;
 extern const char SETTINGS_HTML[] PROGMEM;
+extern const char MESSAGES_HTML[] PROGMEM;
