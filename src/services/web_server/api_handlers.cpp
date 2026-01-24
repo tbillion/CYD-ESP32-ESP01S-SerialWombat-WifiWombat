@@ -1136,3 +1136,171 @@ void handleApiSdConvertFw(WebServer& server) {
 }
 
 #endif // SD_SUPPORT_ENABLED
+
+// ===================================================================================
+// MESSAGE CENTER API HANDLERS
+// ===================================================================================
+
+#include "../../core/messages/message_center.h"
+#include "../../core/messages/boot_manager.h"
+
+// Helper: Convert severity to string
+const char* severityToString(MessageSeverity sev) {
+  switch(sev) {
+    case MessageSeverity::INFO: return "INFO";
+    case MessageSeverity::WARN: return "WARN";
+    case MessageSeverity::ERROR: return "ERROR";
+    default: return "UNKNOWN";
+  }
+}
+
+// GET /api/messages/summary
+// Returns: { active_count, history_count, highest_severity, sequence }
+void handleApiMessagesSummary(WebServer& server) {
+  MessageSummary summary = MessageCenter::getInstance().getSummary();
+  
+  JsonDocument doc;
+  doc["active_count"] = summary.active_count;
+  doc["history_count"] = summary.history_count;
+  doc["highest_severity"] = severityToString(summary.highest_active_severity);
+  doc["sequence"] = summary.sequence;
+  
+  String json;
+  serializeJson(doc, json);
+  server.send(200, "application/json", json);
+}
+
+// GET /api/messages/active
+// Returns: [ { id, timestamp, severity, source, code, title, details, count }, ... ]
+void handleApiMessagesActive(WebServer& server) {
+  const auto& messages = MessageCenter::getInstance().getActiveMessages();
+  
+  JsonDocument doc;
+  JsonArray arr = doc.to<JsonArray>();
+  
+  for (const auto& msg : messages) {
+    JsonObject obj = arr.add<JsonObject>();
+    obj["id"] = msg.id;
+    obj["timestamp"] = msg.timestamp;
+    obj["last_ts"] = msg.last_ts;
+    obj["severity"] = severityToString(msg.severity);
+    obj["source"] = msg.source;
+    obj["code"] = msg.code;
+    obj["title"] = msg.title;
+    obj["details"] = msg.details;
+    obj["count"] = msg.count;
+  }
+  
+  String json;
+  serializeJson(doc, json);
+  server.send(200, "application/json", json);
+}
+
+// GET /api/messages/history
+// Returns: [ { id, timestamp, severity, source, code, title, details, count }, ... ]
+void handleApiMessagesHistory(WebServer& server) {
+  const auto& messages = MessageCenter::getInstance().getHistoryMessages();
+  
+  JsonDocument doc;
+  JsonArray arr = doc.to<JsonArray>();
+  
+  for (const auto& msg : messages) {
+    JsonObject obj = arr.add<JsonObject>();
+    obj["id"] = msg.id;
+    obj["timestamp"] = msg.timestamp;
+    obj["last_ts"] = msg.last_ts;
+    obj["severity"] = severityToString(msg.severity);
+    obj["source"] = msg.source;
+    obj["code"] = msg.code;
+    obj["title"] = msg.title;
+    obj["details"] = msg.details;
+    obj["count"] = msg.count;
+  }
+  
+  String json;
+  serializeJson(doc, json);
+  server.send(200, "application/json", json);
+}
+
+// POST /api/messages/ack
+// Body: { "msg_id": <id> }
+// Returns: { "success": true/false }
+void handleApiMessagesAck(WebServer& server) {
+  if (server.method() != HTTP_POST) {
+    server.send(405, "text/plain", "Method Not Allowed");
+    return;
+  }
+  
+  JsonDocument doc;
+  DeserializationError err = deserializeJson(doc, server.arg("plain"));
+  if (err) {
+    server.send(400, "application/json", "{\"success\":false,\"error\":\"Invalid JSON\"}");
+    return;
+  }
+  
+  uint32_t msg_id = doc["msg_id"] | 0;
+  if (msg_id == 0) {
+    server.send(400, "application/json", "{\"success\":false,\"error\":\"Missing msg_id\"}");
+    return;
+  }
+  
+  bool success = MessageCenter::getInstance().acknowledge(msg_id);
+  
+  if (success) {
+    server.send(200, "application/json", "{\"success\":true}");
+  } else {
+    server.send(404, "application/json", "{\"success\":false,\"error\":\"Message not found\"}");
+  }
+}
+
+// POST /api/messages/ack_all
+// Returns: { "success": true }
+void handleApiMessagesAckAll(WebServer& server) {
+  if (server.method() != HTTP_POST) {
+    server.send(405, "text/plain", "Method Not Allowed");
+    return;
+  }
+  
+  MessageCenter::getInstance().acknowledgeAll();
+  server.send(200, "application/json", "{\"success\":true}");
+}
+
+// POST /api/messages/clear_history
+// Returns: { "success": true }
+void handleApiMessagesClearHistory(WebServer& server) {
+  if (server.method() != HTTP_POST) {
+    server.send(405, "text/plain", "Method Not Allowed");
+    return;
+  }
+  
+  MessageCenter::getInstance().clearHistory();
+  server.send(200, "application/json", "{\"success\":true}");
+}
+
+// GET /messages
+// Returns: HTML page for viewing/managing messages
+void handleMessagesPage(WebServer& server) {
+  server.send(200, "text/html", FPSTR(MESSAGES_HTML));
+}
+
+// ===================================================================================
+// TEST/DEBUG HANDLERS
+// ===================================================================================
+
+// GET /api/test/gauntlet
+// Trigger test messages for verification
+void handleApiTestGauntlet(WebServer& server) {
+  // Post test messages of each severity
+  msg_info("test", TEST_INFO, "Gauntlet INFO Test", "This is an informational test message");
+  msg_warn("test", TEST_WARN, "Gauntlet WARN Test", "This is a warning test message");
+  msg_error("test", TEST_ERROR, "Gauntlet ERROR Test", "This is an error test message");
+  
+  // Post coalescing test (5 times)
+  for (int i = 0; i < 5; i++) {
+    msg_warn("test", TEST_COALESCE, "Coalesce Test", "Occurrence #%d", i + 1);
+    delay(100);
+  }
+  
+  server.send(200, "application/json", 
+    "{\"success\":true,\"message\":\"Gauntlet test complete. Check Messages screen.\"}");
+}

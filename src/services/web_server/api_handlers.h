@@ -49,6 +49,22 @@ void handleApiHealth(WebServer& server);
 void handleApiSystem(WebServer& server);
 
 // ===================================================================================
+// MESSAGE CENTER API HANDLERS
+// ===================================================================================
+void handleApiMessagesSummary(WebServer& server);
+void handleApiMessagesActive(WebServer& server);
+void handleApiMessagesHistory(WebServer& server);
+void handleApiMessagesAck(WebServer& server);
+void handleApiMessagesAckAll(WebServer& server);
+void handleApiMessagesClearHistory(WebServer& server);
+void handleMessagesPage(WebServer& server);
+
+// ===================================================================================
+// TEST/DEBUG HANDLERS
+// ===================================================================================
+void handleApiTestGauntlet(WebServer& server);
+
+// ===================================================================================
 // SD CARD API HANDLERS
 // ===================================================================================
 #if SD_SUPPORT_ENABLED

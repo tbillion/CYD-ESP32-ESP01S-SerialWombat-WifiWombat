@@ -1,0 +1,92 @@
+name: copilot-setup-steps
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/copilot-setup-steps.yml
+  pull_request:
+    paths:
+      - .github/workflows/copilot-setup-steps.yml
+
+jobs:
+  # Copilot requires this job name exactly
+  copilot-setup-steps:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      # Detect whether pip dependency files exist (required to use setup-python cache:pip safely)
+      - name: Detect Python dependency files
+        id: pydeps
+        shell: bash
+        run: |
+          set -e
+          if ls **/requirements*.txt **/pyproject.toml **/poetry.lock **/pdm.lock **/uv.lock 1>/dev/null 2>&1; then
+            echo "found=true" >> "$GITHUB_OUTPUT"
+            echo "Found Python dependency files."
+          else
+            echo "found=false" >> "$GITHUB_OUTPUT"
+            echo "No Python dependency files found; disabling pip cache."
+          fi
+
+      # Python with pip cache only if dependency files exist
+      - name: Set up Python (with pip cache)
+        if: steps.pydeps.outputs.found == 'true'
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+          cache-dependency-path: |
+            **/requirements*.txt
+            **/pyproject.toml
+            **/poetry.lock
+            **/pdm.lock
+            **/uv.lock
+
+      # Python without pip cache if no dependency files exist
+      - name: Set up Python (no pip cache)
+        if: steps.pydeps.outputs.found != 'true'
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install PlatformIO
+        shell: bash
+        run: |
+          python -m pip install --upgrade pip
+          pip install -U platformio
+          pio --version
+
+      # Cache PlatformIO toolchains/frameworks/libs (this is the important cache for ESP32 builds)
+      - name: Cache PlatformIO
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.platformio
+          key: ${{ runner.os }}-platformio-${{ hashFiles('**/platformio.ini', '**/platformio.lock', '**/lib_deps/**', '**/pio.*') }}
+          restore-keys: |
+            ${{ runner.os }}-platformio-
+
+      - name: PlatformIO - Preinstall packages (best effort)
+        shell: bash
+        run: |
+          if [ -f "platformio.ini" ]; then
+            pio pkg install --global || true
+            pio pkg install || true
+          else
+            echo "No platformio.ini at repo root; skipping PlatformIO preinstall."
+          fi
+
+      - name: PlatformIO - Build (best effort)
+        shell: bash
+        run: |
+          if [ -f "platformio.ini" ]; then
+            pio run
+          else
+            echo "No platformio.ini at repo root; skipping build."
+          fi
