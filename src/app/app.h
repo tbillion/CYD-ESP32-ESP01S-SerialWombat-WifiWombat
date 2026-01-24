@@ -53,4 +53,5 @@ private:
   void updateWebServer();
   void updateTCPBridge();
   void updateDisplay();
+  void updateHealthSnapshot();
 };
