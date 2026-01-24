@@ -4,6 +4,12 @@
 #include "../i2c_manager/i2c_manager.h"
 
 // ===================================================================================
+// Global SerialWombat State
+// ===================================================================================
+SerialWombat sw;
+uint8_t currentWombatAddress = 0x6C;  // Default I2C address
+
+// ===================================================================================
 // CONFIGURATOR APPLY LOGIC (JSON -> Wombat)
 // ===================================================================================
 void applyConfiguration(DynamicJsonDocument& doc) {

@@ -22,6 +22,9 @@
 #include "../config/system_config.h"
 #include "../config/defaults.h"
 
+// Core
+#include "../core/globals.h"
+
 // Services
 #include "../services/web_server/api_handlers.h"
 #include "../services/web_server/html_templates.h"
@@ -59,7 +62,7 @@ extern uint8_t currentWombatAddress;    // Defined in serialwombat_manager.cpp
 extern bool g_lvgl_ready;               // Defined in lvgl_wrapper.cpp
 extern bool g_fwUploadOk;               // Defined in api_handlers.cpp
 extern String g_fwUploadMsg;            // Defined in api_handlers.cpp
-extern bool isSDEnabled;                // Defined in main .ino
+// isSDEnabled is now defined in core/globals.cpp
 
 // Directory constants
 static const char* FW_DIR = "/fw";
