@@ -24,6 +24,9 @@
 
 // Core
 #include "../core/globals.h"
+#include "../core/messages/message_center.h"
+#include "../core/messages/boot_manager.h"
+#include "../core/messages/message_codes.h"
 
 // Services
 #include "../services/web_server/api_handlers.h"
@@ -87,6 +90,13 @@ App::App() : server(80), tcpServer(TCP_PORT), tcpClient() {
 // Application Lifecycle - Initialization
 // ===================================================================================
 void App::begin() {
+  // Initialize MessageCenter first (before any messages can be posted)
+  MessageCenter::getInstance().begin();
+  
+  // Initialize BootManager
+  BootManager::getInstance().begin();
+  
+  // Run initialization phases with boot stage tracking
   initSerial();
   initFileSystem();
   initConfiguration();
@@ -95,6 +105,9 @@ void App::begin() {
   initNetwork();
   initWebServer();
   initOTA();
+  
+  // Mark boot complete
+  BootManager::getInstance().bootComplete();
 }
 
 // ===================================================================================
@@ -102,15 +115,28 @@ void App::begin() {
 // ===================================================================================
 
 void App::initSerial() {
+  boot_stage_begin(BootStage::BOOT_01_EARLY, "Early Initialization");
   Serial.begin(115200);
+  delay(100);  // Allow serial to stabilize
+  boot_stage_ok(BootStage::BOOT_01_EARLY, "Serial console ready @ 115200 baud");
 }
 
 void App::initFileSystem() {
+  boot_stage_begin(BootStage::BOOT_03_FILESYSTEM, "Filesystem Mount");
+  
   // LittleFS (ESP32) - auto format on first mount failure
   if (!LittleFS.begin(true)) {
+    msg_warn("fs", FS_LFS_FORMAT_BEGIN, "Formatting Filesystem", 
+             "Auto-formatting LittleFS (first boot or corrupted)");
     LittleFS.format();
-    LittleFS.begin(true);
+    if (!LittleFS.begin(true)) {
+      boot_stage_fail(BootStage::BOOT_03_FILESYSTEM, "LittleFS mount and format failed");
+      return;  // Critical failure, but continue in RAM-only mode
+    }
+    msg_info("fs", FS_LFS_FORMAT_OK, "Filesystem Formatted", "LittleFS ready");
   }
+
+  boot_stage_ok(BootStage::BOOT_03_FILESYSTEM, "LittleFS mounted successfully");
 
   // Ensure storage folders exist
   if (!LittleFS.exists(FW_DIR)) LittleFS.mkdir(FW_DIR);
@@ -120,12 +146,17 @@ void App::initFileSystem() {
 }
 
 void App::initConfiguration() {
+  boot_stage_begin(BootStage::BOOT_02_CONFIG, "Configuration Load");
+  
   // Load (or create) CYD runtime config
   if (!loadConfig(g_cfg)) {
     setConfigDefaults(g_cfg);
     // first boot (not configured yet)
     g_cfg.configured = false;
     saveConfig(g_cfg);
+    boot_stage_warn(BootStage::BOOT_02_CONFIG, "Config file missing, defaults applied");
+  } else {
+    boot_stage_ok(BootStage::BOOT_02_CONFIG, "Configuration loaded successfully");
   }
 }
 
@@ -142,43 +173,56 @@ void App::initHardware() {
 
 void App::initDisplay() {
 #if DISPLAY_SUPPORT_ENABLED
+  boot_stage_begin(BootStage::BOOT_05_DISPLAY, "Display Initialization");
+  
   // Initialize local display stack (LovyanGFX + LVGL) if enabled
   if (g_cfg.display_enable && g_cfg.lvgl_enable && !g_cfg.headless) {
     if (lvglInitIfEnabled()) {
+      boot_stage_ok(BootStage::BOOT_05_DISPLAY, "Display ready");
       if (!g_cfg.configured) {
         firstBootShowModelSelect();
       }
+    } else {
+      boot_stage_fail(BootStage::BOOT_05_DISPLAY, "Display initialization failed");
     }
+  } else {
+    boot_stage_warn(BootStage::BOOT_05_DISPLAY, "Display disabled (headless mode)");
   }
+#else
+  boot_stage_warn(BootStage::BOOT_05_DISPLAY, "Display support not compiled");
 #endif
 }
 
 void App::initNetwork() {
+  boot_stage_begin(BootStage::BOOT_07_NETWORK, "Network Initialization");
+  
   WiFiManager wm;
   wm.setConfigPortalTimeout(180);
   if (!wm.autoConnect("Wombat-Setup")) {
     WiFi.mode(WIFI_AP);
     WiFi.softAP("Wombat-Setup");
+    boot_stage_warn(BootStage::BOOT_07_NETWORK, "WiFi failed, AP mode active: 'Wombat-Setup'");
+  } else {
+    boot_stage_ok(BootStage::BOOT_07_NETWORK, 
+                  "WiFi connected: %s (IP: %s)", 
+                  WiFi.SSID().c_str(), WiFi.localIP().toString().c_str());
   }
   
   // Security warning on startup
   #if SECURITY_ENABLED
-  Serial.println("\n*** SECURITY WARNING ***");
-  Serial.println("Authentication is ENABLED");
-  Serial.print("Username: ");
-  Serial.println(AUTH_USERNAME);
   if (strcmp(AUTH_PASSWORD, "CHANGE_ME_NOW") == 0) {
-    Serial.println("*** DEFAULT PASSWORD DETECTED ***");
-    Serial.println("*** CHANGE AUTH_PASSWORD IN CODE IMMEDIATELY ***");
-    Serial.println("*** SYSTEM IS NOT SECURE WITH DEFAULT PASSWORD ***");
+    msg_error("security", SEC_DEFAULT_PASSWORD, "Default Password Detected", 
+              "CHANGE AUTH_PASSWORD IN CODE IMMEDIATELY - System is NOT secure");
   }
-  Serial.println("************************\n");
   #else
-  Serial.println("\n*** WARNING: SECURITY DISABLED ***\n");
+  msg_warn("security", SEC_DISABLED, "Security Disabled", 
+           "Authentication is DISABLED - Enable for production use");
   #endif
 }
 
 void App::initWebServer() {
+  boot_stage_begin(BootStage::BOOT_09_SERVICES, "Services Initialization");
+  
   // ===================================================================================
   // Dashboard + Tools
   // ===================================================================================
@@ -310,9 +354,13 @@ void App::initWebServer() {
   // Start web server and TCP server
   server.begin();
   tcpServer.begin();
+  
+  boot_stage_ok(BootStage::BOOT_09_SERVICES, "Web server (port 80) and TCP bridge (port 3000) started");
 }
 
 void App::initOTA() {
+  // Note: OTA init doesn't have a separate boot stage; it's part of BOOT_09_SERVICES
+  
   // Configure OTA security
   ArduinoOTA.setPassword(AUTH_PASSWORD);
   ArduinoOTA.setHostname("wombat-bridge");
@@ -320,16 +368,22 @@ void App::initOTA() {
   // OTA security callbacks
   ArduinoOTA.onStart([]() {
     String type = (ArduinoOTA.getCommand() == U_FLASH) ? "firmware" : "filesystem";
-    Serial.println("OTA Update Start: " + type);
+    msg_info("ota", OTA_UPDATE_START, "OTA Update Started", "Type: %s", type.c_str());
+  });
+  
+  ArduinoOTA.onEnd([]() {
+    msg_info("ota", OTA_UPDATE_OK, "OTA Update Complete", "Rebooting...");
   });
   
   ArduinoOTA.onError([](ota_error_t error) {
-    Serial.printf("OTA Error[%u]: ", error);
-    if (error == OTA_AUTH_ERROR) Serial.println("Auth Failed");
-    else if (error == OTA_BEGIN_ERROR) Serial.println("Begin Failed");
-    else if (error == OTA_CONNECT_ERROR) Serial.println("Connect Failed");
-    else if (error == OTA_RECEIVE_ERROR) Serial.println("Receive Failed");
-    else if (error == OTA_END_ERROR) Serial.println("End Failed");
+    const char* err_msg = "Unknown error";
+    if (error == OTA_AUTH_ERROR) err_msg = "Authentication Failed";
+    else if (error == OTA_BEGIN_ERROR) err_msg = "Begin Failed";
+    else if (error == OTA_CONNECT_ERROR) err_msg = "Connect Failed";
+    else if (error == OTA_RECEIVE_ERROR) err_msg = "Receive Failed";
+    else if (error == OTA_END_ERROR) err_msg = "End Failed";
+    
+    msg_error("ota", OTA_UPDATE_FAIL, "OTA Update Failed", err_msg);
   });
   
   ArduinoOTA.begin();

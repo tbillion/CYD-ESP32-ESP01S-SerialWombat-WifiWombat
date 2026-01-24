@@ -10,6 +10,8 @@
 #include <Arduino.h>
 #include <WebServer.h>
 #include <WiFiClient.h>
+#include "../core/messages/message_center.h"
+#include "../core/messages/boot_manager.h"
 
 class App {
 public:
