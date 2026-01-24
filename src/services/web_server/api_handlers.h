@@ -60,6 +60,11 @@ void handleApiMessagesClearHistory(WebServer& server);
 void handleMessagesPage(WebServer& server);
 
 // ===================================================================================
+// TEST/DEBUG HANDLERS
+// ===================================================================================
+void handleApiTestGauntlet(WebServer& server);
+
+// ===================================================================================
 // SD CARD API HANDLERS
 // ===================================================================================
 #if SD_SUPPORT_ENABLED

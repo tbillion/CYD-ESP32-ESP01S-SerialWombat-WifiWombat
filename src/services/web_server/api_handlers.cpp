@@ -1282,3 +1282,25 @@ void handleApiMessagesClearHistory(WebServer& server) {
 void handleMessagesPage(WebServer& server) {
   server.send(200, "text/html", FPSTR(MESSAGES_HTML));
 }
+
+// ===================================================================================
+// TEST/DEBUG HANDLERS
+// ===================================================================================
+
+// GET /api/test/gauntlet
+// Trigger test messages for verification
+void handleApiTestGauntlet(WebServer& server) {
+  // Post test messages of each severity
+  msg_info("test", TEST_INFO, "Gauntlet INFO Test", "This is an informational test message");
+  msg_warn("test", TEST_WARN, "Gauntlet WARN Test", "This is a warning test message");
+  msg_error("test", TEST_ERROR, "Gauntlet ERROR Test", "This is an error test message");
+  
+  // Post coalescing test (5 times)
+  for (int i = 0; i < 5; i++) {
+    msg_warn("test", TEST_COALESCE, "Coalesce Test", "Occurrence #%d", i + 1);
+    delay(100);
+  }
+  
+  server.send(200, "application/json", 
+    "{\"success\":true,\"message\":\"Gauntlet test complete. Check Messages screen.\"}");
+}
