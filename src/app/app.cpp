@@ -26,6 +26,7 @@
 #include "../services/web_server/api_handlers.h"
 #include "../services/web_server/html_templates.h"
 #include "../services/serialwombat/serialwombat_manager.h"
+#include "../services/tcp_bridge/tcp_bridge.h"
 
 // UI
 #include "../ui/lvgl_wrapper.h"
@@ -76,7 +77,7 @@ App& App::getInstance() {
 }
 
 // Private constructor
-App::App() : server(80), tcpServer(TCP_PORT) {
+App::App() : server(80), tcpServer(TCP_PORT), tcpClient() {
 }
 
 // ===================================================================================
@@ -354,7 +355,7 @@ void App::updateWebServer() {
 }
 
 void App::updateTCPBridge() {
-  handleTcpBridge();
+  handleTcpBridge(tcpServer, tcpClient, currentWombatAddress);
 }
 
 void App::updateDisplay() {

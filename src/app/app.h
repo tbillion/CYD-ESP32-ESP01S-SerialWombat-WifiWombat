@@ -31,6 +31,7 @@ private:
   // Core services
   WebServer server;
   WiFiServer tcpServer;
+  WiFiClient tcpClient;
   
   // Initialization phases
   void initSerial();
