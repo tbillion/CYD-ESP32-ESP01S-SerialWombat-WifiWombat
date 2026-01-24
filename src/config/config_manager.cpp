@@ -1,6 +1,8 @@
 #include "config_manager.h"
 #include <LittleFS.h>
 #include <ArduinoJson.h>
+#include "../core/messages/message_center.h"
+#include "../core/messages/message_codes.h"
 
 #if SD_SUPPORT_ENABLED
 // SD runtime pins (forward declarations from sd_storage)
@@ -226,8 +228,22 @@ bool saveConfig(const SystemConfig &cfg) {
   doc["splash"] = cfg.splash_path;
 
   File f = LittleFS.open(CFG_PATH, "w");
-  if (!f) return false;
+  if (!f) {
+    msg_error("config", CFG_SAVE_FAIL, "Config Save Failed", 
+              "Failed to open config file for writing");
+    return false;
+  }
+  
   bool ok = (serializeJson(doc, f) > 0);
   f.close();
+  
+  if (ok) {
+    msg_info("config", CFG_SAVE_OK, "Configuration Saved", 
+             "System configuration saved successfully");
+  } else {
+    msg_error("config", CFG_SAVE_FAIL, "Config Save Failed", 
+              "Failed to serialize configuration to file");
+  }
+  
   return ok;
 }
