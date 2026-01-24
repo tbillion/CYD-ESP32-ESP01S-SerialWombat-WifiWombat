@@ -40,8 +40,11 @@ private:
   void initFileSystem();
   void initConfiguration();
   void initHardware();
+  void initSD();
   void initDisplay();
+  void initTouch();
   void initNetwork();
+  void initTimeSync();
   void initWebServer();
   void initOTA();
   

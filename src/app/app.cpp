@@ -34,9 +34,16 @@
 #include "../services/serialwombat/serialwombat_manager.h"
 #include "../services/tcp_bridge/tcp_bridge.h"
 
+// HAL
+#include "../hal/storage/sd_storage.h"
+
 // UI
 #include "../ui/lvgl_wrapper.h"
 #include "../ui/screens/setup_wizard.h"
+
+// Time sync
+#include <time.h>
+#include <sys/time.h>
 
 // ===================================================================================
 // Security Configuration (from main .ino file)
@@ -101,8 +108,11 @@ void App::begin() {
   initFileSystem();
   initConfiguration();
   initHardware();
+  initSD();
   initDisplay();
+  initTouch();
   initNetwork();
+  initTimeSync();
   initWebServer();
   initOTA();
   
@@ -171,6 +181,28 @@ void App::initHardware() {
   sw.begin(Wire, currentWombatAddress);
 }
 
+void App::initSD() {
+#if SD_SUPPORT_ENABLED
+  boot_stage_begin(BootStage::BOOT_04_SD, "SD Card Detection");
+  
+  if (SD_SUPPORT_ENABLED && g_cfg.sd_enable) {
+    if (sdMount()) {
+      boot_stage_ok(BootStage::BOOT_04_SD, "SD card mounted successfully");
+      msg_info("sd", SD_MOUNT_OK, "SD Card Ready", 
+               "SD card detected and mounted");
+    } else {
+      boot_stage_warn(BootStage::BOOT_04_SD, "No SD card detected, continuing without SD");
+      msg_warn("sd", SD_NOT_PRESENT, "SD Card Not Present", 
+               "No SD card detected. Insert SD card for additional storage");
+    }
+  } else {
+    boot_stage_warn(BootStage::BOOT_04_SD, "SD support disabled in configuration");
+  }
+#else
+  boot_stage_warn(BootStage::BOOT_04_SD, "SD support not compiled");
+#endif
+}
+
 void App::initDisplay() {
 #if DISPLAY_SUPPORT_ENABLED
   boot_stage_begin(BootStage::BOOT_05_DISPLAY, "Display Initialization");
@@ -190,6 +222,29 @@ void App::initDisplay() {
   }
 #else
   boot_stage_warn(BootStage::BOOT_05_DISPLAY, "Display support not compiled");
+#endif
+}
+
+void App::initTouch() {
+#if DISPLAY_SUPPORT_ENABLED
+  boot_stage_begin(BootStage::BOOT_06_TOUCH, "Touch Controller Initialization");
+  
+  if (g_cfg.display_enable && g_cfg.touch_enable && g_lvgl_ready) {
+    // Touch is initialized as part of LovyanGFX/LVGL setup
+    // The touch driver is part of the display initialization
+    if (g_cfg.touch != TOUCH_NONE) {
+      boot_stage_ok(BootStage::BOOT_06_TOUCH, "Touch controller initialized");
+      msg_info("touch", TOUCH_INIT_OK, "Touch Initialized", "Touch controller ready for input");
+    } else {
+      boot_stage_warn(BootStage::BOOT_06_TOUCH, "Touch type not configured");
+      msg_warn("touch", TOUCH_CAL_REQUIRED, "Touch Not Configured", 
+               "Touch controller type not set. Configure in setup wizard");
+    }
+  } else {
+    boot_stage_warn(BootStage::BOOT_06_TOUCH, "Touch disabled or display not available");
+  }
+#else
+  boot_stage_warn(BootStage::BOOT_06_TOUCH, "Display/Touch support not compiled");
 #endif
 }
 
@@ -218,6 +273,45 @@ void App::initNetwork() {
   msg_warn("security", SEC_DISABLED, "Security Disabled", 
            "Authentication is DISABLED - Enable for production use");
   #endif
+}
+
+void App::initTimeSync() {
+  boot_stage_begin(BootStage::BOOT_08_TIME, "Time Synchronization");
+  
+  // Only attempt NTP sync if WiFi is connected (not in AP mode)
+  if (WiFi.getMode() == WIFI_MODE_STA && WiFi.status() == WL_CONNECTED) {
+    // Configure NTP with multiple servers for redundancy
+    configTime(0, 0, "pool.ntp.org", "time.nist.gov", "time.google.com");
+    
+    // Wait up to 5 seconds for time sync
+    int retry = 0;
+    const int maxRetries = 10;  // 10 * 500ms = 5 seconds max
+    struct tm timeinfo;
+    
+    while (retry < maxRetries) {
+      if (getLocalTime(&timeinfo, 500)) {
+        // Time sync successful
+        char timeStr[64];
+        strftime(timeStr, sizeof(timeStr), "%Y-%m-%d %H:%M:%S", &timeinfo);
+        boot_stage_ok(BootStage::BOOT_08_TIME, "Time synchronized: %s UTC", timeStr);
+        msg_info("time", BOOT_08_TIME_OK, "Time Synchronized", 
+                 "System time set via NTP: %s UTC", timeStr);
+        return;
+      }
+      retry++;
+      delay(500);
+    }
+    
+    // Time sync failed but not critical
+    boot_stage_warn(BootStage::BOOT_08_TIME, "NTP sync failed, continuing with system time");
+    msg_warn("time", BOOT_08_TIME_FAIL, "Time Sync Failed", 
+             "Could not synchronize time with NTP servers. Timestamps may be incorrect");
+  } else {
+    // No internet connection (AP mode), skip NTP
+    boot_stage_warn(BootStage::BOOT_08_TIME, "No internet connection, skipping NTP sync");
+    msg_warn("time", BOOT_08_TIME_FAIL, "Time Sync Skipped", 
+             "No internet connection available for NTP synchronization");
+  }
 }
 
 void App::initWebServer() {
