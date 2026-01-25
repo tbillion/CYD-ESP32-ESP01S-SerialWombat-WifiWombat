@@ -4,7 +4,7 @@
 
 #if DISPLAY_SUPPORT_ENABLED
 
-#include <lvgl.h>
+#  include <lvgl.h>
 
 // LVGL initialization state
 extern bool g_lvgl_ready;
@@ -22,4 +22,4 @@ extern volatile uint32_t g_i2c_rx_count;
 bool lvglInitIfEnabled();
 void lvglTickAndUpdate();
 
-#endif // DISPLAY_SUPPORT_ENABLED
+#endif  // DISPLAY_SUPPORT_ENABLED

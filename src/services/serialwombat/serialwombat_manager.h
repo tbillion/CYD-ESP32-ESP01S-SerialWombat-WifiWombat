@@ -2,9 +2,10 @@
 #define SERIALWOMBAT_MANAGER_H
 
 #include <Arduino.h>
-#include <WebServer.h>
+
 #include <ArduinoJson.h>
 #include <SerialWombat.h>
+#include <WebServer.h>
 #include <Wire.h>
 
 // Forward declarations
@@ -37,4 +38,4 @@ void handleChangeAddr(WebServer& server);
  */
 void handleResetTarget(WebServer& server);
 
-#endif // SERIALWOMBAT_MANAGER_H
+#endif  // SERIALWOMBAT_MANAGER_H

@@ -18,7 +18,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       # Detect whether pip dependency files exist (required to use setup-python cache:pip safely)
       - name: Detect Python dependency files
@@ -37,7 +37,7 @@ jobs:
       # Python with pip cache only if dependency files exist
       - name: Set up Python (with pip cache)
         if: steps.pydeps.outputs.found == 'true'
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
         with:
           python-version: "3.11"
           cache: "pip"
@@ -51,7 +51,7 @@ jobs:
       # Python without pip cache if no dependency files exist
       - name: Set up Python (no pip cache)
         if: steps.pydeps.outputs.found != 'true'
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
         with:
           python-version: "3.11"
 
@@ -64,7 +64,7 @@ jobs:
 
       # Cache PlatformIO toolchains/frameworks/libs (this is the important cache for ESP32 builds)
       - name: Cache PlatformIO
-        uses: actions/cache@v4
+        uses: actions/cache@8b402f58fbc84540c8b491a91e594a4576fec3d7 # v5.0.2
         with:
           path: |
             ~/.platformio

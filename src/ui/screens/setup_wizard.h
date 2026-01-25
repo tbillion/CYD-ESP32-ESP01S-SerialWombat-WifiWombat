@@ -4,8 +4,9 @@
 
 #if DISPLAY_SUPPORT_ENABLED
 
-#include <lvgl.h>
-#include <Arduino.h>
+#  include <Arduino.h>
+
+#  include <lvgl.h>
 
 // Setup wizard UI objects
 extern lv_obj_t* g_dd_model;
@@ -16,8 +17,8 @@ extern String g_sd_cwd;
 // Setup wizard screens
 void firstBootShowModelSelect();
 
-#if SD_SUPPORT_ENABLED
+#  if SD_SUPPORT_ENABLED
 void firstBootShowSplashPicker();
-#endif
+#  endif
 
-#endif // DISPLAY_SUPPORT_ENABLED
+#endif  // DISPLAY_SUPPORT_ENABLED

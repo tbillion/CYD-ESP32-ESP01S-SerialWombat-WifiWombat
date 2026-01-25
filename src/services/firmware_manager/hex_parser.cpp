@@ -2,11 +2,15 @@
 
 IntelHexSW8B::IntelHexSW8B() {}
 
-static bool fileWriteAt_(fs::FS& fs, const char* path, uint32_t offset, const uint8_t* buf, uint32_t len) {
+static bool fileWriteAt_(fs::FS& fs, const char* path, uint32_t offset, const uint8_t* buf,
+                         uint32_t len) {
   File f = fs.open(path, "r+");
   if (!f) f = fs.open(path, "w+");
   if (!f) return false;
-  if (!f.seek(offset)) { f.close(); return false; }
+  if (!f.seek(offset)) {
+    f.close();
+    return false;
+  }
   size_t w = f.write(buf, len);
   f.close();
   return (w == len);
@@ -17,7 +21,7 @@ bool IntelHexSW8B::begin(fs::FS& fs, const char* cacheDir) {
   _cacheDir = cacheDir;
   if (!_cacheDir.startsWith("/")) _cacheDir = "/" + _cacheDir;
 
-  _dataPath  = _cacheDir + "/data.bin";
+  _dataPath = _cacheDir + "/data.bin";
   _validPath = _cacheDir + "/valid.bin";
 
   _warnings = "";
@@ -46,7 +50,7 @@ bool IntelHexSW8B::ensureCacheFiles_() {
 
 void IntelHexSW8B::clearCache() {
   if (!_fs) return;
-  if (_fs->exists(_dataPath.c_str()))  _fs->remove(_dataPath.c_str());
+  if (_fs->exists(_dataPath.c_str())) _fs->remove(_dataPath.c_str());
   if (_fs->exists(_validPath.c_str())) _fs->remove(_validPath.c_str());
   ensureCacheFiles_();
   _warnings = "";
@@ -60,7 +64,10 @@ bool IntelHexSW8B::readPageValid_(uint32_t pageIndex, uint8_t* valid32) {
   File f = _fs->open(_validPath.c_str(), "r");
   if (!f) return false;
   uint32_t sz = (uint32_t)f.size();
-  if (off >= sz) { f.close(); return true; }
+  if (off >= sz) {
+    f.close();
+    return true;
+  }
 
   f.seek(off);
   int r = f.read(valid32, VALID_BYTES);
@@ -83,7 +90,10 @@ bool IntelHexSW8B::readPageData_(uint32_t pageIndex, uint8_t* data256) {
   File f = _fs->open(_dataPath.c_str(), "r");
   if (!f) return false;
   uint32_t sz = (uint32_t)f.size();
-  if (off >= sz) { f.close(); return true; }
+  if (off >= sz) {
+    f.close();
+    return true;
+  }
 
   f.seek(off);
   int r = f.read(data256, PAGE_SIZE);
@@ -100,7 +110,7 @@ bool IntelHexSW8B::writePageData_(uint32_t pageIndex, const uint8_t* data256) {
 
 bool IntelHexSW8B::setByte_(uint32_t addr, uint8_t value) {
   uint32_t page = addr >> 8;
-  uint32_t off  = addr & 0xFF;
+  uint32_t off = addr & 0xFF;
 
   uint8_t valid[VALID_BYTES];
   uint8_t data[PAGE_SIZE];
@@ -135,7 +145,7 @@ bool IntelHexSW8B::setByte_(uint32_t addr, uint8_t value) {
 
 bool IntelHexSW8B::getByte_(uint32_t addr, uint8_t& value, bool& isValid) {
   uint32_t page = addr >> 8;
-  uint32_t off  = addr & 0xFF;
+  uint32_t off = addr & 0xFF;
 
   uint8_t valid[VALID_BYTES];
   uint8_t data[PAGE_SIZE];
@@ -180,7 +190,8 @@ bool IntelHexSW8B::parseLine_(const String& raw, bool enforceChecksum, uint32_t&
 
   // Remove whitespace inside line (like Regex.Replace("\\s*", ""))
   {
-    String out; out.reserve(line.length());
+    String out;
+    out.reserve(line.length());
     for (size_t i = 0; i < line.length(); i++) {
       char c = line[i];
       if (!isspace((unsigned char)c)) out += c;
@@ -280,13 +291,12 @@ bool IntelHexSW8B::loadHexFile(const char* hexPath, bool enforceChecksum) {
   return true;
 }
 
-bool IntelHexSW8B::exportFW_CH32V003_16K_Strict(const char* outPath,
-                                               bool trailingComma,
-                                               bool newlineAtEnd) {
+bool IntelHexSW8B::exportFW_CH32V003_16K_Strict(const char* outPath, bool trailingComma,
+                                                bool newlineAtEnd) {
   if (!_fs) return false;
 
   const uint32_t start = 0x00000000;
-  const uint32_t end   = 0x00004000; // 16KB
+  const uint32_t end = 0x00004000;  // 16KB
 
   File out = _fs->open(outPath, "w");
   if (!out) return false;
@@ -297,8 +307,14 @@ bool IntelHexSW8B::exportFW_CH32V003_16K_Strict(const char* outPath,
     uint8_t b0, b1;
     bool v0, v1;
 
-    if (!getByte_(a,   b0, v0)) { out.close(); return false; }
-    if (!getByte_(a+1, b1, v1)) { out.close(); return false; }
+    if (!getByte_(a, b0, v0)) {
+      out.close();
+      return false;
+    }
+    if (!getByte_(a + 1, b1, v1)) {
+      out.close();
+      return false;
+    }
 
     if (!v0 || !v1) {
       out.close();
@@ -309,7 +325,7 @@ bool IntelHexSW8B::exportFW_CH32V003_16K_Strict(const char* outPath,
       return false;
     }
 
-    uint16_t w = (uint16_t)(b0 | ((uint16_t)b1 << 8)); // little-endian word packing
+    uint16_t w = (uint16_t)(b0 | ((uint16_t)b1 << 8));  // little-endian word packing
 
     char buf[8];
     snprintf(buf, sizeof(buf), "0x%04X", (unsigned)w);
@@ -325,7 +341,8 @@ bool IntelHexSW8B::exportFW_CH32V003_16K_Strict(const char* outPath,
   return true;
 }
 
-uint16_t IntelHexSW8B::crc16ccitt(uint32_t start, uint32_t exclusiveEnd, bool strict, uint8_t fillValue) {
+uint16_t IntelHexSW8B::crc16ccitt(uint32_t start, uint32_t exclusiveEnd, bool strict,
+                                  uint8_t fillValue) {
   uint16_t crc = 0xFFFF;
   for (uint32_t a = start; a < exclusiveEnd; a++) {
     uint8_t b;
@@ -348,8 +365,10 @@ uint16_t IntelHexSW8B::crc16ccitt(uint32_t start, uint32_t exclusiveEnd, bool st
 
     crc ^= (uint16_t)b << 8;
     for (int j = 0; j < 8; j++) {
-      if (crc & 0x8000) crc = (uint16_t)((crc << 1) ^ 0x1021);
-      else crc <<= 1;
+      if (crc & 0x8000)
+        crc = (uint16_t)((crc << 1) ^ 0x1021);
+      else
+        crc <<= 1;
     }
   }
   return crc;

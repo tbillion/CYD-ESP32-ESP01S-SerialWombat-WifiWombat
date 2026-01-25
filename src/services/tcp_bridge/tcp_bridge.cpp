@@ -1,23 +1,26 @@
 /*
  * TCP Bridge Service - Implementation
- * 
+ *
  * TCP-to-I2C bridge for remote SerialWombat device access.
- * 
+ *
  * Protocol:
  * - Client connects to TCP port 3000
  * - Sends 8-byte command packets
  * - Receives 8-byte response packets
  * - Commands are forwarded to I2C device
  * - Single client at a time (additional connections rejected)
- * 
+ *
  * Extracted from original .ino file (lines 3812-3847).
  */
 
 #include "tcp_bridge.h"
-#include "../../core/i2c_monitor.h"
+
 #include <Arduino.h>
-#include <Wire.h>
+
 #include <ArduinoOTA.h>
+#include <Wire.h>
+
+#include "../../core/i2c_monitor.h"
 
 void initTcpBridge(WiFiServer& server) {
   server.begin();
@@ -56,7 +59,7 @@ void handleTcpBridge(WiFiServer& server, WiFiClient& client, uint8_t targetI2CAd
       // Read 8-byte response from I2C device
       uint8_t bytesRead = Wire.requestFrom(targetI2CAddress, (uint8_t)8);
       i2cMarkRx();  // Update I2C traffic indicator
-      
+
       for (int i = 0; i < 8; i++) {
         if (i < bytesRead) {
           rxBuffer[i] = Wire.read();
@@ -67,7 +70,7 @@ void handleTcpBridge(WiFiServer& server, WiFiClient& client, uint8_t targetI2CAd
 
       // Send response back to TCP client
       client.write(rxBuffer, 8);
-      
+
       // Keep system responsive during bridge operations
       ArduinoOTA.handle();
       yield();
