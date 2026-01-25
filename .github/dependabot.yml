@@ -1,0 +1,36 @@
+# Dependabot configuration for automated dependency updates
+# https://docs.github.com/en/code-security/dependabot/dependabot-version-updates/configuration-options-for-the-dependabot.yml-file
+
+version: 2
+updates:
+  # GitHub Actions dependency updates
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+    open-pull-requests-limit: 10
+    labels:
+      - "dependencies"
+      - "github-actions"
+    commit-message:
+      prefix: "ci"
+      include: "scope"
+    reviewers:
+      - "tbillion"
+    assignees:
+      - "tbillion"
+
+  # PlatformIO / Arduino library dependencies
+  # Note: Dependabot doesn't natively support platformio.ini, but we can monitor
+  # updates manually or use GitHub Security Advisories for known vulnerabilities
+  # in the libraries we depend on.
+  #
+  # Libraries to monitor manually:
+  # - ArduinoJson: https://github.com/bblanchon/ArduinoJson
+  # - LovyanGFX: https://github.com/lovyan03/LovyanGFX
+  # - lvgl: https://github.com/lvgl/lvgl
+  # - SdFat: https://github.com/greiman/SdFat
+  # - SerialWombat: https://github.com/BroadwellConsultingInc/SerialWombat
+  # - WiFiManager: https://github.com/tzapu/WiFiManager
