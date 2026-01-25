@@ -60,7 +60,7 @@ jobs:
           PLATFORMIO_BUILD_FLAGS: -DPIO_FRAMEWORK_ARDUINO_ENABLE_EXCEPTIONS
 
       - name: Upload firmware artifacts
-        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           name: firmware-${{ matrix.environment }}
           path: .pio/build/${{ matrix.environment }}/firmware.bin
