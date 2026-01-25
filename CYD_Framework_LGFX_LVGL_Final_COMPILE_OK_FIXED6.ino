@@ -54,36 +54,6 @@ static uint64_t sd_used_bytes();
 #include "src/services/i2c_manager/i2c_manager.h"
 #include "src/services/serialwombat/serialwombat_manager.h"
 #include "src/services/web_server/api_handlers.h"
-
-// ===================================================================================
-// --- SECURITY CONFIGURATION ---
-// ===================================================================================
-// CRITICAL: Change these credentials before deployment!
-// Default credentials are for initial setup only.
-#define SECURITY_ENABLED 1
-#define AUTH_USERNAME "admin"
-#define AUTH_PASSWORD "CHANGE_ME_NOW"  // MUST be changed!
-
-// Build-time check for default password (compile warning)
-#if defined(SECURITY_ENABLED) && SECURITY_ENABLED == 1
-  #if !defined(AUTH_PASSWORD) || (defined(AUTH_PASSWORD) && strcmp(AUTH_PASSWORD, "CHANGE_ME_NOW") == 0)
-    #warning "*** SECURITY WARNING: Default password detected! Change AUTH_PASSWORD before deployment ***"
-  #endif
-#endif
-
-#define MAX_UPLOAD_SIZE (5 * 1024 * 1024)  // 5MB max upload
-#define MAX_JSON_SIZE 8192  // 8KB max JSON payload
-
-// CORS Configuration
-// WARNING: Default allows all origins (*). For production, change to specific domain:
-// #define CORS_ALLOW_ORIGIN "https://yourdomain.com"
-#define CORS_ALLOW_ORIGIN "*"  // CHANGE IN PRODUCTION!
-
-// Rate limiting (simple time-based)
-static unsigned long g_last_auth_fail = 0;
-static uint8_t g_auth_fail_count = 0;
-static const uint16_t AUTH_LOCKOUT_MS = 5000;  // 5 second lockout after failed auth
-
 // ===================================================================================
 // --- SECURITY CONFIGURATION ---
 // ===================================================================================
