@@ -52,14 +52,15 @@ pio run --target upload
 
 **BEFORE deploying, you MUST change default passwords:**
 
-Edit `CYD_Framework_LGFX_LVGL_Final_COMPILE_OK_FIXED6.ino`:
+Edit `src/config/defaults.h`:
 ```cpp
-#define AUTH_PASSWORD "YourStrongPassword"  // Line 26
-#define OTA_PASSWORD "YourOTAPassword"      // Line 30
-#define CORS_ALLOW_ORIGIN "https://yourdomain.com"  // Line 47
+#define AUTH_PASSWORD "YourStrongPassword"  // Used for web auth AND OTA
+#define CORS_ALLOW_ORIGIN "https://yourdomain.com"
 ```
 
 Recompile and upload. See [SECURITY.md](SECURITY.md) for complete hardening guide.
+
+> **Note:** The firmware has been refactored into a modular architecture. The legacy monolithic `.ino` file is preserved as `.ino.legacy` for reference. See [LEGACY_INO_README.md](LEGACY_INO_README.md) for details.
 
 ## Architecture
 
