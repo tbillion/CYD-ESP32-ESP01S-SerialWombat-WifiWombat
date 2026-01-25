@@ -4,7 +4,7 @@
 
 #if DISPLAY_SUPPORT_ENABLED
 
-#include <lvgl.h>
+#  include <lvgl.h>
 
 // Show the messages screen
 void showMessagesScreen();
@@ -12,4 +12,4 @@ void showMessagesScreen();
 // Show message detail popup
 void showMessageDetail(uint32_t msg_id);
 
-#endif // DISPLAY_SUPPORT_ENABLED
+#endif  // DISPLAY_SUPPORT_ENABLED

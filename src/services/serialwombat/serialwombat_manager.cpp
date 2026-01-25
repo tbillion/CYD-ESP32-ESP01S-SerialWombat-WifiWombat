@@ -1,7 +1,8 @@
 #include "serialwombat_manager.h"
-#include "../security/validators.h"
-#include "../security/auth_service.h"
+
 #include "../i2c_manager/i2c_manager.h"
+#include "../security/auth_service.h"
+#include "../security/validators.h"
 
 // ===================================================================================
 // Global SerialWombat State
@@ -37,10 +38,12 @@ void applyConfiguration(DynamicJsonDocument& doc) {
       q.begin(pins["A"] | 0, pins["B"] | 1, settings["debounce"] | 2);
     } else if (type == "ULTRASONIC") {
       SerialWombatUltrasonicDistanceSensor u(sw);
-      u.begin(pins["echo"] | 1, SerialWombatUltrasonicDistanceSensor::driver::HC_SR04, pins["trig"] | 0, true, false);
+      u.begin(pins["echo"] | 1, SerialWombatUltrasonicDistanceSensor::driver::HC_SR04,
+              pins["trig"] | 0, true, false);
     } else if (type == "TM1637") {
       SerialWombatTM1637 t(sw);
-      t.begin(pins["clk"] | 0, pins["dio"] | 1, settings["digits"] | 4, (SWTM1637Mode)2, 0, settings["bright"] | 7);
+      t.begin(pins["clk"] | 0, pins["dio"] | 1, settings["digits"] | 4, (SWTM1637Mode)2, 0,
+              settings["bright"] | 7);
       t.writeBrightness(settings["bright"] | 7);
     } else if (type == "PWM_DIMMER") {
       SerialWombatPWM p(sw);
@@ -84,17 +87,17 @@ void handleConnect(WebServer& server) {
   // Authentication required for I2C operations
   if (!checkAuth(server)) return;
   addSecurityHeaders(server);
-  
+
   if (server.hasArg("addr")) {
     String addrStr = server.arg("addr");
     uint8_t addr = (uint8_t)strtol(addrStr.c_str(), NULL, 16);
-    
+
     // Validate I2C address
     if (!isValidI2CAddress(addr)) {
       server.send(400, "text/plain", "Invalid I2C address. Must be 0x08-0x77");
       return;
     }
-    
+
     currentWombatAddress = addr;
     sw.begin(Wire, currentWombatAddress);
   }
@@ -106,23 +109,23 @@ void handleSetPin(WebServer& server) {
   // Authentication required for pin configuration
   if (!checkAuth(server)) return;
   addSecurityHeaders(server);
-  
+
   if (server.hasArg("pin") && server.hasArg("mode")) {
     int pin = server.arg("pin").toInt();
     int mode = server.arg("mode").toInt();
-    
+
     // Validate pin number
     if (!isValidPinNumber(pin)) {
       server.send(400, "text/plain", "Invalid pin number");
       return;
     }
-    
+
     // Validate mode range (assuming valid modes 0-40 based on pinModeStrings)
     if (!isValidRange(mode, 0, 40)) {
       server.send(400, "text/plain", "Invalid mode value");
       return;
     }
-    
+
     uint8_t tx[8] = {200, (uint8_t)pin, (uint8_t)mode, 0, 0, 0, 0, 0};
     sw.sendPacket(tx);
   }
@@ -134,7 +137,7 @@ void handleChangeAddr(WebServer& server) {
   // Authentication required for address changes
   if (!checkAuth(server)) return;
   addSecurityHeaders(server);
-  
+
   if (server.hasArg("newaddr")) {
     String val = server.arg("newaddr");
     uint8_t newAddr = (uint8_t)strtol(val.c_str(), NULL, 16);
@@ -143,7 +146,7 @@ void handleChangeAddr(WebServer& server) {
       server.send(400, "text/plain", "Invalid I2C address. Must be 0x08-0x77");
       return;
     }
-    
+
     // 1) Library method (known good on SW8B)
     sw.setThroughputPin((uint32_t)newAddr);
     delay(200);
@@ -180,7 +183,7 @@ void handleResetTarget(WebServer& server) {
   // Authentication required for hardware reset
   if (!checkAuth(server)) return;
   addSecurityHeaders(server);
-  
+
   sw.hardwareReset();
   server.sendHeader("Location", "/");
   server.send(303);

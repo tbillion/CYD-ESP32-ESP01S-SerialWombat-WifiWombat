@@ -288,8 +288,6 @@ const char INDEX_HTML_TAIL[] PROGMEM = R"rawliteral(
 </html>
 )rawliteral";
 
-
-
 #if SD_SUPPORT_ENABLED
 // ===================================================================================
 // --- SD Card Management UI Fragments (injected conditionally) ---
@@ -743,7 +741,6 @@ function deleteConfig() {
 <br><button class="btn btn-green" onclick="applyConfig()">APPLY CONFIG</button>
 </body></html>
 )rawliteral";
-
 
 const char SETTINGS_HTML[] PROGMEM = R"rawliteral(
 <!DOCTYPE HTML><html>

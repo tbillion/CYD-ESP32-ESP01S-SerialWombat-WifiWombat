@@ -1,9 +1,9 @@
 /*
  * RGB LED HAL - Header
- * 
+ *
  * Hardware abstraction for RGB LED control.
  * Supports common anode and common cathode configurations.
- * 
+ *
  * For LCDWIKI 3.5" ESP32-32E:
  *   - RED:   GPIO22
  *   - GREEN: GPIO16
@@ -43,4 +43,5 @@ void rgbLedWhite();
 void rgbLedOff();
 
 // Blink effect
-void rgbLedBlink(uint8_t red, uint8_t green, uint8_t blue, uint16_t onTimeMs, uint16_t offTimeMs, uint8_t count);
+void rgbLedBlink(uint8_t red, uint8_t green, uint8_t blue, uint16_t onTimeMs, uint16_t offTimeMs,
+                 uint8_t count);

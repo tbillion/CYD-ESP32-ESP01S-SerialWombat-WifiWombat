@@ -1,12 +1,13 @@
 /*
  * Message Center - Implementation
- * 
+ *
  * PLC-style message/acknowledgment system core logic.
  */
 
 #include "message_center.h"
-#include <LittleFS.h>
+
 #include <ArduinoJson.h>
+#include <LittleFS.h>
 
 // Persistence file paths
 const char* MessageCenter::HISTORY_FILE = "/messages/history.json";
@@ -21,8 +22,7 @@ MessageCenter& MessageCenter::getInstance() {
   return instance;
 }
 
-MessageCenter::MessageCenter() 
-  : sequence_(0), next_msg_id_(1), update_callback_(nullptr) {
+MessageCenter::MessageCenter() : sequence_(0), next_msg_id_(1), update_callback_(nullptr) {
   mutex_ = xSemaphoreCreateMutex();
 }
 
@@ -32,18 +32,18 @@ MessageCenter::MessageCenter()
 
 void MessageCenter::begin() {
   xSemaphoreTake(mutex_, portMAX_DELAY);
-  
+
   // Ensure messages directory exists
   if (!LittleFS.exists("/messages")) {
     LittleFS.mkdir("/messages");
   }
-  
+
   // Load persisted history
   loadHistory();
-  
+
   // Optionally load active messages (for re-latching on reboot)
   // loadActive();
-  
+
   xSemaphoreGive(mutex_);
 }
 
@@ -52,14 +52,14 @@ void MessageCenter::begin() {
 // ===================================================================================
 
 uint32_t MessageCenter::post(MessageSeverity severity, const char* source, const char* code,
-                              const char* title, const char* details) {
+                             const char* title, const char* details) {
   xSemaphoreTake(mutex_, portMAX_DELAY);
-  
+
   uint32_t msg_id = 0;
-  
+
   // Check for existing active message with same {severity, source, code}
   Message* existing = findActiveMessage(source, code, severity);
-  
+
   if (existing) {
     // Coalesce: increment count, update timestamp and details
     existing->count++;
@@ -82,31 +82,32 @@ uint32_t MessageCenter::post(MessageSeverity severity, const char* source, const
     msg.details = String(details ? details : "");
     msg.count = 1;
     msg.acknowledged = false;
-    
+
     active_messages_.push_back(msg);
     msg_id = msg.id;
     incrementSequence();
-    
+
     // Log to serial for debugging
-    const char* sev_str = (severity == MessageSeverity::INFO) ? "INFO" :
-                          (severity == MessageSeverity::WARN) ? "WARN" : "ERROR";
+    const char* sev_str = (severity == MessageSeverity::INFO)   ? "INFO"
+                          : (severity == MessageSeverity::WARN) ? "WARN"
+                                                                : "ERROR";
     Serial.printf("[%s] %s: %s - %s\n", sev_str, source, title, details ? details : "");
   }
-  
+
   xSemaphoreGive(mutex_);
-  
+
   notifyUpdate();
   return msg_id;
 }
 
 uint32_t MessageCenter::postf(MessageSeverity severity, const char* source, const char* code,
-                               const char* title, const char* fmt, ...) {
+                              const char* title, const char* fmt, ...) {
   char details[256];
   va_list args;
   va_start(args, fmt);
   vsnprintf(details, sizeof(details), fmt, args);
   va_end(args);
-  
+
   return post(severity, source, code, title, details);
 }
 
@@ -116,9 +117,9 @@ uint32_t MessageCenter::postf(MessageSeverity severity, const char* source, cons
 
 bool MessageCenter::acknowledge(uint32_t msg_id) {
   xSemaphoreTake(mutex_, portMAX_DELAY);
-  
+
   bool found = false;
-  
+
   // Find message in active list
   for (auto it = active_messages_.begin(); it != active_messages_.end(); ++it) {
     if (it->id == msg_id) {
@@ -126,54 +127,54 @@ bool MessageCenter::acknowledge(uint32_t msg_id) {
       it->acknowledged = true;
       history_messages_.push_back(*it);
       active_messages_.erase(it);
-      
+
       incrementSequence();
       found = true;
       break;
     }
   }
-  
+
   xSemaphoreGive(mutex_);
-  
+
   if (found) {
     saveHistory();  // Persist history
     notifyUpdate();
   }
-  
+
   return found;
 }
 
 void MessageCenter::acknowledgeAll() {
   xSemaphoreTake(mutex_, portMAX_DELAY);
-  
+
   // Move all active messages to history
   for (auto& msg : active_messages_) {
     msg.acknowledged = true;
     history_messages_.push_back(msg);
   }
-  
+
   active_messages_.clear();
   incrementSequence();
-  
+
   xSemaphoreGive(mutex_);
-  
+
   saveHistory();
   notifyUpdate();
 }
 
 void MessageCenter::clearHistory() {
   xSemaphoreTake(mutex_, portMAX_DELAY);
-  
+
   history_messages_.clear();
   incrementSequence();
-  
+
   xSemaphoreGive(mutex_);
-  
+
   // Delete history file
   if (LittleFS.exists(HISTORY_FILE)) {
     LittleFS.remove(HISTORY_FILE);
   }
-  
+
   notifyUpdate();
 }
 
@@ -183,13 +184,13 @@ void MessageCenter::clearHistory() {
 
 MessageSeverity MessageCenter::getHighestActiveSeverity() const {
   MessageSeverity highest = MessageSeverity::INFO;
-  
+
   for (const auto& msg : active_messages_) {
     if (msg.severity > highest) {
       highest = msg.severity;
     }
   }
-  
+
   return highest;
 }
 
@@ -220,11 +221,10 @@ Message* MessageCenter::findMessageById(uint32_t msg_id) {
 // Internal Helpers
 // ===================================================================================
 
-Message* MessageCenter::findActiveMessage(const char* source, const char* code, MessageSeverity severity) {
+Message* MessageCenter::findActiveMessage(const char* source, const char* code,
+                                          MessageSeverity severity) {
   for (auto& msg : active_messages_) {
-    if (msg.severity == severity && 
-        msg.source.equals(source) && 
-        msg.code.equals(code)) {
+    if (msg.severity == severity && msg.source.equals(source) && msg.code.equals(code)) {
       return &msg;
     }
   }
@@ -254,11 +254,11 @@ void MessageCenter::saveHistory() {
   while (history_messages_.size() > MAX_HISTORY) {
     history_messages_.erase(history_messages_.begin());
   }
-  
+
   // Create JSON document
   JsonDocument doc;
   JsonArray arr = doc.to<JsonArray>();
-  
+
   for (const auto& msg : history_messages_) {
     JsonObject obj = arr.add<JsonObject>();
     obj["id"] = msg.id;
@@ -271,7 +271,7 @@ void MessageCenter::saveHistory() {
     obj["details"] = msg.details;
     obj["count"] = msg.count;
   }
-  
+
   // Write to file
   File file = LittleFS.open(HISTORY_FILE, "w");
   if (file) {
@@ -284,21 +284,21 @@ void MessageCenter::loadHistory() {
   if (!LittleFS.exists(HISTORY_FILE)) {
     return;  // No history file, start fresh
   }
-  
+
   File file = LittleFS.open(HISTORY_FILE, "r");
   if (!file) {
     return;
   }
-  
+
   JsonDocument doc;
   DeserializationError error = deserializeJson(doc, file);
   file.close();
-  
+
   if (error) {
     Serial.println("MessageCenter: Failed to parse history file");
     return;
   }
-  
+
   JsonArray arr = doc.as<JsonArray>();
   for (JsonObject obj : arr) {
     Message msg;
@@ -312,9 +312,9 @@ void MessageCenter::loadHistory() {
     msg.details = obj["details"] | "";
     msg.count = obj["count"] | 1;
     msg.acknowledged = true;
-    
+
     history_messages_.push_back(msg);
-    
+
     // Update next_msg_id to avoid collisions
     if (msg.id >= next_msg_id_) {
       next_msg_id_ = msg.id + 1;
@@ -326,7 +326,7 @@ void MessageCenter::saveActive() {
   // Similar to saveHistory but for active messages
   JsonDocument doc;
   JsonArray arr = doc.to<JsonArray>();
-  
+
   for (const auto& msg : active_messages_) {
     JsonObject obj = arr.add<JsonObject>();
     obj["id"] = msg.id;
@@ -339,7 +339,7 @@ void MessageCenter::saveActive() {
     obj["details"] = msg.details;
     obj["count"] = msg.count;
   }
-  
+
   File file = LittleFS.open(ACTIVE_FILE, "w");
   if (file) {
     serializeJson(doc, file);
@@ -351,21 +351,21 @@ void MessageCenter::loadActive() {
   if (!LittleFS.exists(ACTIVE_FILE)) {
     return;
   }
-  
+
   File file = LittleFS.open(ACTIVE_FILE, "r");
   if (!file) {
     return;
   }
-  
+
   JsonDocument doc;
   DeserializationError error = deserializeJson(doc, file);
   file.close();
-  
+
   if (error) {
     Serial.println("MessageCenter: Failed to parse active file");
     return;
   }
-  
+
   JsonArray arr = doc.as<JsonArray>();
   for (JsonObject obj : arr) {
     Message msg;
@@ -379,9 +379,9 @@ void MessageCenter::loadActive() {
     msg.details = obj["details"] | "";
     msg.count = obj["count"] | 1;
     msg.acknowledged = false;
-    
+
     active_messages_.push_back(msg);
-    
+
     if (msg.id >= next_msg_id_) {
       next_msg_id_ = msg.id + 1;
     }

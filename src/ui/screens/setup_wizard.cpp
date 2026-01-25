@@ -2,31 +2,32 @@
 
 #if DISPLAY_SUPPORT_ENABLED
 
-#include "../lvgl_wrapper.h"
-#include "../components/statusbar.h"
-#include "../../config/system_config.h"
-#include <LittleFS.h>
-#include <ESP.h>
+#  include <ESP.h>
+#  include <LittleFS.h>
 
-#if SD_SUPPORT_ENABLED
-#define CYD_USE_SDFAT 1
-#include <SdFat.h>
-#endif
+#  include "../../config/system_config.h"
+#  include "../components/statusbar.h"
+#  include "../lvgl_wrapper.h"
+
+#  if SD_SUPPORT_ENABLED
+#    define CYD_USE_SDFAT 1
+#    include <SdFat.h>
+#  endif
 
 // Forward declarations for functions still in main .ino
 extern CydModel strToModel(const String& s);
-extern void applyModelPreset(SystemConfig &cfg);
-extern bool saveConfig(const SystemConfig &cfg);
+extern void applyModelPreset(SystemConfig& cfg);
+extern bool saveConfig(const SystemConfig& cfg);
 
-#if SD_SUPPORT_ENABLED
+#  if SD_SUPPORT_ENABLED
 // SD abstraction types and functions (defined in main .ino)
 typedef FsFile SDFile;
 extern bool sdMount();
 extern SDFile sdOpen(const char* path, oflag_t flags);
-extern bool sdOpenNext(SDFile &dir, SDFile &out);
+extern bool sdOpenNext(SDFile& dir, SDFile& out);
 extern bool sdIsDir(const char* path);
 extern bool sdCopyToLittleFS(const char* sd_path, const char* lfs_path);
-#endif
+#  endif
 
 // Setup wizard UI objects
 lv_obj_t* g_dd_model = nullptr;
@@ -35,19 +36,19 @@ lv_obj_t* g_file_list = nullptr;
 String g_sd_cwd = "/";
 
 // Forward declarations
-static void onModelEvent(lv_event_t * e);
-static void onNextEvent(lv_event_t * e);
-#if SD_SUPPORT_ENABLED
-static void onFileListEvent(lv_event_t * e);
+static void onModelEvent(lv_event_t* e);
+static void onNextEvent(lv_event_t* e);
+#  if SD_SUPPORT_ENABLED
+static void onFileListEvent(lv_event_t* e);
 static bool sdListDirToLV(const String& dir);
-#endif
+#  endif
 
-static void onModelEvent(lv_event_t * e) {
+static void onModelEvent(lv_event_t* e) {
   (void)e;
   g_firstboot_interacted = true;
 }
 
-static void onNextEvent(lv_event_t * e) {
+static void onNextEvent(lv_event_t* e) {
   (void)e;
   g_firstboot_interacted = true;
   if (!g_dd_model) return;
@@ -56,13 +57,13 @@ static void onNextEvent(lv_event_t * e) {
   g_cfg.model = strToModel(String(buf));
   applyModelPreset(g_cfg);
   // Proceed to SD splash picker if SD is enabled, otherwise just commit and reboot.
-#if SD_SUPPORT_ENABLED
+#  if SD_SUPPORT_ENABLED
   firstBootShowSplashPicker();
-#else
+#  else
   g_cfg.configured = true;
   saveConfig(g_cfg);
   ESP.restart();
-#endif
+#  endif
 }
 
 void firstBootShowModelSelect() {
@@ -75,8 +76,8 @@ void firstBootShowModelSelect() {
   lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 40);
 
   g_dd_model = lv_dropdown_create(lv_scr_act());
-  lv_dropdown_set_options(g_dd_model,
-    "2432S028R\n2432S028C\n2432S022C\n2432S032\n3248S035\n4827S043\n8048S050\n8048S070\nS3_GENERIC");
+  lv_dropdown_set_options(g_dd_model, "2432S028R\n2432S028C\n2432S022C\n2432S032\n3248S035\n4827S04"
+                                      "3\n8048S050\n8048S070\nS3_GENERIC");
   lv_obj_set_width(g_dd_model, lv_pct(80));
   lv_obj_align(g_dd_model, LV_ALIGN_CENTER, 0, -10);
   lv_obj_add_event_cb(g_dd_model, onModelEvent, LV_EVENT_VALUE_CHANGED, nullptr);
@@ -96,8 +97,8 @@ void firstBootShowModelSelect() {
   buildStatusBar();
 }
 
-#if SD_SUPPORT_ENABLED
-static void onFileListEvent(lv_event_t * e) {
+#  if SD_SUPPORT_ENABLED
+static void onFileListEvent(lv_event_t* e) {
   g_firstboot_interacted = true;
   if (lv_event_get_code(e) != LV_EVENT_VALUE_CHANGED) return;
   if (!g_file_list) return;
@@ -108,8 +109,10 @@ static void onFileListEvent(lv_event_t * e) {
   if (sel == "..") {
     if (g_sd_cwd != "/") {
       int last = g_sd_cwd.lastIndexOf('/');
-      if (last <= 0) g_sd_cwd = "/";
-      else g_sd_cwd = g_sd_cwd.substring(0, last);
+      if (last <= 0)
+        g_sd_cwd = "/";
+      else
+        g_sd_cwd = g_sd_cwd.substring(0, last);
       sdListDirToLV(g_sd_cwd);
     }
     return;
@@ -139,23 +142,29 @@ static bool sdListDirToLV(const String& dir) {
   SDFile d = sdOpen(dir.c_str(), O_RDONLY);
   if (!d) return false;
 
-#if CYD_USE_SDFAT
-  if (!d.isDir()) { d.close(); return false; }
-#else
-  if (!d.isDirectory()) { d.close(); return false; }
-#endif
+#    if CYD_USE_SDFAT
+  if (!d.isDir()) {
+    d.close();
+    return false;
+  }
+#    else
+  if (!d.isDirectory()) {
+    d.close();
+    return false;
+  }
+#    endif
 
   String opts = "..";
   SDFile e;
   while (sdOpenNext(d, e)) {
     String name;
-#if CYD_USE_SDFAT
+#    if CYD_USE_SDFAT
     char n[96] = {0};
     e.getName(n, sizeof(n));
     name = String(n);
-#else
+#    else
     name = String(e.name());
-#endif
+#    endif
     if (name.length() && name != "." && name != "..") {
       opts += "\n" + name;
     }
@@ -187,5 +196,5 @@ void firstBootShowSplashPicker() {
 
   buildStatusBar();
 }
-#endif
-#endif // DISPLAY_SUPPORT_ENABLED
+#  endif
+#endif  // DISPLAY_SUPPORT_ENABLED

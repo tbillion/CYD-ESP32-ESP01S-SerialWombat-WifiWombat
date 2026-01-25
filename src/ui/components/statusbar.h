@@ -4,7 +4,7 @@
 
 #if DISPLAY_SUPPORT_ENABLED
 
-#include <lvgl.h>
+#  include <lvgl.h>
 
 // Status bar UI objects
 extern lv_obj_t* g_status_bar;
@@ -20,4 +20,4 @@ void buildStatusBar();
 // Update message badge
 void updateMessageBadge();
 
-#endif // DISPLAY_SUPPORT_ENABLED
+#endif  // DISPLAY_SUPPORT_ENABLED

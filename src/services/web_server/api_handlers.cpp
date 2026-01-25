@@ -1,17 +1,19 @@
 #include "api_handlers.h"
-#include "../security/auth_service.h"
-#include "html_templates.h"
-#include "../security/validators.h"
-#include "../../config/config_manager.h"
-#include "../i2c_manager/i2c_manager.h"
-#include "../serialwombat/serialwombat_manager.h"
-#include "../../core/messages/message_center.h"
-#include "../../core/messages/boot_manager.h"
-#include "../../core/messages/health_snapshot.h"
+
+#include <ArduinoOTA.h>
 #include <LittleFS.h>
 #include <WiFi.h>
 #include <WiFiManager.h>
-#include <ArduinoOTA.h>
+
+#include "../../config/config_manager.h"
+#include "../../core/messages/boot_manager.h"
+#include "../../core/messages/health_snapshot.h"
+#include "../../core/messages/message_center.h"
+#include "../i2c_manager/i2c_manager.h"
+#include "../security/auth_service.h"
+#include "../security/validators.h"
+#include "../serialwombat/serialwombat_manager.h"
+#include "html_templates.h"
 
 // External global variables
 extern SerialWombat sw;
@@ -53,9 +55,9 @@ extern SDFile sd_open(const char* path, oflag_t flags);
 extern bool sd_rename(const String& from, const String& to);
 extern uint64_t sd_filesize(SDFile& f);
 extern bool sdRemoveRecursive(const String& path);
-extern String sdFileName(SDFile &f);
-extern bool sdFileIsDir(SDFile &f);
-extern bool sdOpenNext(SDFile &dir, SDFile &out);
+extern String sdFileName(SDFile& f);
+extern bool sdFileIsDir(SDFile& f);
+extern bool sdOpenNext(SDFile& dir, SDFile& out);
 extern uint64_t sd_total_bytes();
 extern uint64_t sd_used_bytes();
 extern bool sdCopyToLittleFS(const char* sd_path, const char* lfs_path);
@@ -68,7 +70,8 @@ extern String joinPath(const String& dir, const String& base);
 extern String normalizePath(String p);
 extern void fsListFilesBySuffix(const char* suffix, String& outOptionsHtml, bool& foundAny);
 extern bool convertFwTxtToBin(const char* fwTxtPath, const char* outBinPath, String& err);
-extern bool convertHexToFirmwareBin(const String& tempHexPath, const String& outBinPath, String& outWarnOrErr);
+extern bool convertHexToFirmwareBin(const String& tempHexPath, const String& outBinPath,
+                                    String& outWarnOrErr);
 extern bool ensureDir(const char* path);
 extern String makeFileSafeName(const String& in);
 extern String sanitizePath(const String& raw);
@@ -83,16 +86,20 @@ extern bool fwTxtToBin(const String& inPath, const String& outBinPath, String& e
 void handleRoot(WebServer& server) {
   // Public page but add security headers
   addSecurityHeaders(server);
-  
+
   String s = FPSTR(INDEX_HTML_HEAD);
 
   // Insert a simple nav bar without altering the stored v06 HTML constants.
   // (Served HTML gains a 2-tab bar; original Dashboard content remains intact.)
-  const String nav =
-    "<div style='background:#333;padding:10px;margin:0 -10px 10px -10px;border-bottom:1px solid #444;'>"
-    "<a href='/' style='color:white;font-weight:bold;margin:0 10px;text-decoration:none;border-bottom:2px solid white;'>Dashboard</a>"
-    "<a href='/configure' style='color:#00d2ff;font-weight:bold;margin:0 10px;text-decoration:none;'>Configurator</a><a href='/settings' style='color:#00d2ff;font-weight:bold;margin:0 10px;text-decoration:none;'>System Settings</a>"
-    "</div>";
+  const String nav = "<div style='background:#333;padding:10px;margin:0 -10px 10px "
+                     "-10px;border-bottom:1px solid #444;'>"
+                     "<a href='/' style='color:white;font-weight:bold;margin:0 "
+                     "10px;text-decoration:none;border-bottom:2px solid white;'>Dashboard</a>"
+                     "<a href='/configure' style='color:#00d2ff;font-weight:bold;margin:0 "
+                     "10px;text-decoration:none;'>Configurator</a><a href='/settings' "
+                     "style='color:#00d2ff;font-weight:bold;margin:0 "
+                     "10px;text-decoration:none;'>System Settings</a>"
+                     "</div>";
   s.replace("<body>", "<body>" + nav);
 
   String addrHex = String(currentWombatAddress, HEX);
@@ -127,7 +134,7 @@ void handleResetWiFi(WebServer& server) {
   // Authentication required for WiFi reset (critical operation)
   if (!checkAuth(server)) return;
   addSecurityHeaders(server);
-  
+
   WiFiManager wm;
   wm.resetSettings();
   ESP.restart();
@@ -137,7 +144,7 @@ void handleFormat(WebServer& server) {
   // Authentication required for filesystem format (destructive operation)
   if (!checkAuth(server)) return;
   addSecurityHeaders(server);
-  
+
   LittleFS.format();
   server.sendHeader("Location", "/");
   server.send(303);
@@ -150,7 +157,7 @@ void handleCleanSlot(WebServer& server) {
   // Authentication required for slot cleanup
   if (!checkAuth(server)) return;
   addSecurityHeaders(server);
-  
+
   if (!server.hasArg("prefix")) {
     server.send(400, "text/plain", "Missing prefix");
     return;
@@ -350,7 +357,7 @@ void handleFlashFW(WebServer& server) {
   // Authentication required for firmware flashing (critical operation)
   if (!checkAuth(server)) return;
   addSecurityHeaders(server);
-  
+
   if (!server.hasArg("fw_name")) {
     server.send(400, "text/plain", "No selection");
     return;
@@ -387,14 +394,15 @@ void handleFlashFW(WebServer& server) {
     base.trim();
     if (base.length()) {
       tryPath(joinPath(FW_DIR, base));
-      tryPath("/" + base); // legacy root
+      tryPath("/" + base);  // legacy root
     }
   }
 
   // Final fallback: if it started with "//" from any weirdness, collapse it.
   if (!resolved.length() && fwName.startsWith("//")) {
     String collapsed = fwName;
-    while (collapsed.startsWith("//")) collapsed.remove(0, 1);
+    while (collapsed.startsWith("//"))
+      collapsed.remove(0, 1);
     tryPath(collapsed);
   }
 
@@ -434,7 +442,11 @@ void handleFlashFW(WebServer& server) {
 
   server.setContentLength(CONTENT_LENGTH_UNKNOWN);
   server.send(200, "text/html", "");
-  server.sendContent(F("<!DOCTYPE HTML><html><head><meta http-equiv='refresh' content='10;url=/'><style>body{background:#000;color:#0f0;font-family:monospace;padding:20px;white-space:pre-wrap;}</style></head><body><h2>SW8B Firmware Update</h2>"));
+  server.sendContent(
+      F("<!DOCTYPE HTML><html><head><meta http-equiv='refresh' "
+        "content='10;url=/"
+        "'><style>body{background:#000;color:#0f0;font-family:monospace;padding:20px;white-space:"
+        "pre-wrap;}</style></head><body><h2>SW8B Firmware Update</h2>"));
   server.sendContent("Flashing: " + fwName + " (" + String(fwFile.size()) + " bytes)\n");
 
   sw.begin(Wire, currentWombatAddress, false);
@@ -465,17 +477,15 @@ void handleFlashFW(WebServer& server) {
 
     int bytesRead = fwFile.read(buffer, 64);
     if (bytesRead < 64) {
-      for (int k = bytesRead; k < 64; k++) buffer[k] = 0xFF;
+      for (int k = bytesRead; k < 64; k++)
+        buffer[k] = 0xFF;
     }
 
     uint32_t page[16];
     bool dirty = false;
     for (int i = 0; i < 16; i++) {
-      uint32_t val =
-        (uint32_t)buffer[i * 4] +
-        ((uint32_t)buffer[i * 4 + 1] << 8) +
-        ((uint32_t)buffer[i * 4 + 2] << 16) +
-        ((uint32_t)buffer[i * 4 + 3] << 24);
+      uint32_t val = (uint32_t)buffer[i * 4] + ((uint32_t)buffer[i * 4 + 1] << 8) +
+                     ((uint32_t)buffer[i * 4 + 2] << 16) + ((uint32_t)buffer[i * 4 + 3] << 24);
       page[i] = val;
       if (val != 0xFFFFFFFF) dirty = true;
     }
@@ -533,8 +543,10 @@ void handleTcpBridge() {
       uint8_t bytesRead = Wire.requestFrom(currentWombatAddress, (uint8_t)8);
       i2cMarkRx();
       for (int i = 0; i < 8; i++) {
-        if (i < bytesRead) rxBuffer[i] = Wire.read();
-        else rxBuffer[i] = 0xFF;
+        if (i < bytesRead)
+          rxBuffer[i] = Wire.read();
+        else
+          rxBuffer[i] = 0xFF;
       }
 
       tcpClient.write(rxBuffer, 8);
@@ -559,12 +571,13 @@ void handleApiVariant(WebServer& server) {
   // Authentication required for variant info
   if (!checkAuth(server)) return;
   addSecurityHeaders(server);
-  
+
   VariantInfo info = getDeepScanInfoSingle(currentWombatAddress);
   DynamicJsonDocument doc(1536);
   doc["variant"] = info.variant;
   JsonArray capsArr = doc.createNestedArray("capabilities");
-  for (int i = 0; i < 41; i++) if (info.caps[i]) capsArr.add(i);
+  for (int i = 0; i < 41; i++)
+    if (info.caps[i]) capsArr.add(i);
   String out;
   serializeJson(doc, out);
   server.send(200, "application/json", out);
@@ -574,13 +587,13 @@ void handleApiApply(WebServer& server) {
   // Authentication required for configuration changes
   if (!checkAuth(server)) return;
   addSecurityHeaders(server);
-  
+
   // Validate JSON size
   if (!isJsonSizeSafe(server.arg("plain"))) {
     server.send(413, "text/plain", "Payload too large");
     return;
   }
-  
+
   DynamicJsonDocument doc(8192);
   DeserializationError err = deserializeJson(doc, server.arg("plain"));
   if (err) {
@@ -595,19 +608,25 @@ void handleConfigSave(WebServer& server) {
   // Authentication required for saving configurations
   if (!checkAuth(server)) return;
   addSecurityHeaders(server);
-  
-  if (!server.hasArg("name")) { server.send(400, "text/plain", "Missing name"); return; }
-  
+
+  if (!server.hasArg("name")) {
+    server.send(400, "text/plain", "Missing name");
+    return;
+  }
+
   // Validate JSON size
   if (!isJsonSizeSafe(server.arg("plain"))) {
     server.send(413, "text/plain", "Payload too large");
     return;
   }
-  
+
   String name = server.arg("name");
   String path = configPathFromName(name);
   File f = LittleFS.open(path, "w");
-  if (!f) { server.send(500, "text/plain", "Open failed"); return; }
+  if (!f) {
+    server.send(500, "text/plain", "Open failed");
+    return;
+  }
   f.print(server.arg("plain"));
   f.close();
   server.send(200, "text/plain", "Saved");
@@ -617,8 +636,11 @@ void handleConfigLoad(WebServer& server) {
   // Config load might contain sensitive info, require auth
   if (!checkAuth(server)) return;
   addSecurityHeaders(server);
-  
-  if (!server.hasArg("name")) { server.send(400, "text/plain", "Missing name"); return; }
+
+  if (!server.hasArg("name")) {
+    server.send(400, "text/plain", "Missing name");
+    return;
+  }
   String name = server.arg("name");
   String path = configPathFromName(name);
   File f = LittleFS.open(path, "r");
@@ -627,7 +649,10 @@ void handleConfigLoad(WebServer& server) {
     String legacy = String("/config_") + sanitizeBasename(name) + String(".json");
     f = LittleFS.open(legacy, "r");
   }
-  if (!f) { server.send(404, "text/plain", "Not found"); return; }
+  if (!f) {
+    server.send(404, "text/plain", "Not found");
+    return;
+  }
   server.streamFile(f, "application/json");
   f.close();
 }
@@ -636,7 +661,7 @@ void handleConfigList(WebServer& server) {
   // Authentication required for config listing
   if (!checkAuth(server)) return;
   addSecurityHeaders(server);
-  
+
   DynamicJsonDocument doc(4096);
   JsonArray arr = doc.to<JsonArray>();
 
@@ -686,8 +711,11 @@ void handleConfigExists(WebServer& server) {
   // Authentication required for config check
   if (!checkAuth(server)) return;
   addSecurityHeaders(server);
-  
-  if (!server.hasArg("name")) { server.send(400, "text/plain", "Missing name"); return; }
+
+  if (!server.hasArg("name")) {
+    server.send(400, "text/plain", "Missing name");
+    return;
+  }
   DynamicJsonDocument doc(128);
   doc["exists"] = LittleFS.exists(configPathFromName(server.arg("name")));
   String out;
@@ -699,8 +727,11 @@ void handleConfigDelete(WebServer& server) {
   // Authentication required for deleting configurations
   if (!checkAuth(server)) return;
   addSecurityHeaders(server);
-  
-  if (!server.hasArg("name")) { server.send(400, "text/plain", "Missing name"); return; }
+
+  if (!server.hasArg("name")) {
+    server.send(400, "text/plain", "Missing name");
+    return;
+  }
   LittleFS.remove(configPathFromName(server.arg("name")));
   server.send(200, "text/plain", "Deleted");
 }
@@ -710,25 +741,25 @@ void handleConfigDelete(WebServer& server) {
 // ===================================================================================
 void handleApiHealth(WebServer& server) {
   addSecurityHeaders(server);
-  
+
   // Update health snapshot
   HealthSnapshotManager::getInstance().update();
   auto health = HealthSnapshotManager::getInstance().getSnapshot();
-  
+
   DynamicJsonDocument doc(1024);
-  
+
   // Overall health
   doc["status"] = HealthSnapshotManager::getInstance().getHealthString();
   doc["overall_health"] = (int)health.overall;
   doc["boot_complete"] = health.boot_complete;
   doc["boot_degraded"] = health.boot_degraded;
-  
+
   // Message counts
   doc["active_messages"] = health.active_count;
   doc["error_count"] = health.error_count;
   doc["warn_count"] = health.warn_count;
   doc["info_count"] = health.info_count;
-  
+
   // Subsystem status
   JsonObject subsystems = doc.createNestedObject("subsystems");
   subsystems["filesystem"] = health.filesystem_ok;
@@ -736,20 +767,20 @@ void handleApiHealth(WebServer& server) {
   subsystems["display"] = health.display_ok;
   subsystems["network"] = health.network_ok;
   subsystems["services"] = health.services_ok;
-  
+
   // System metrics
   doc["uptime_ms"] = millis();
   doc["heap_free"] = ESP.getFreeHeap();
   doc["wifi_connected"] = WiFi.isConnected();
   doc["wifi_rssi"] = WiFi.RSSI();
   doc["ip"] = WiFi.localIP().toString();
-  
-  #if SD_SUPPORT_ENABLED
+
+#if SD_SUPPORT_ENABLED
   if (isSDEnabled) {
     doc["sd_mounted"] = g_sdMounted;
   }
-  #endif
-  
+#endif
+
   String out;
   serializeJson(doc, out);
   server.send(200, "application/json", out);
@@ -759,7 +790,7 @@ void handleApiSystem(WebServer& server) {
   // Authentication required for detailed system info
   if (!checkAuth(server)) return;
   addSecurityHeaders(server);
-  
+
   DynamicJsonDocument doc(768);
   doc["cpu_mhz"] = ESP.getCpuFreqMHz();
   doc["flash_speed_hz"] = (uint32_t)ESP.getFlashChipSpeed();
@@ -786,24 +817,24 @@ void handleApiSystem(WebServer& server) {
   doc["sd_mounted"] = (bool)g_sdMounted;
   if (g_sdMounted) {
     uint64_t total = 0, used = 0;
-    // Arduino-ESP32 SD.h provides totalBytes/usedBytes on FS.
-    #if defined(ARDUINO_ARCH_ESP32)
-      total = sd_total_bytes();
-      used  = sd_used_bytes();
-    #endif
+// Arduino-ESP32 SD.h provides totalBytes/usedBytes on FS.
+#  if defined(ARDUINO_ARCH_ESP32)
+    total = sd_total_bytes();
+    used = sd_used_bytes();
+#  endif
     doc["sd_total"] = total;
-    doc["sd_used"]  = used;
-    doc["sd_free"]  = (total >= used) ? (total - used) : 0;
+    doc["sd_used"] = used;
+    doc["sd_free"] = (total >= used) ? (total - used) : 0;
   } else {
     doc["sd_total"] = 0;
-    doc["sd_used"]  = 0;
-    doc["sd_free"]  = 0;
+    doc["sd_used"] = 0;
+    doc["sd_free"] = 0;
   }
 #else
   doc["sd_mounted"] = false;
   doc["sd_total"] = 0;
-  doc["sd_used"]  = 0;
-  doc["sd_free"]  = 0;
+  doc["sd_used"] = 0;
+  doc["sd_free"] = 0;
 #endif
 
   String out;
@@ -820,7 +851,7 @@ void handleApiSdStatus(WebServer& server) {
   // Authentication required for SD status
   if (!checkAuth(server)) return;
   addSecurityHeaders(server);
-  
+
   DynamicJsonDocument doc(256);
   doc["enabled"] = (bool)isSDEnabled;
   if (!isSDEnabled) {
@@ -840,14 +871,20 @@ void handleApiSdList(WebServer& server) {
   // Authentication required for SD file listing
   if (!checkAuth(server)) return;
   addSecurityHeaders(server);
-  
-  if (!sdEnsureMounted()) { server.send(500, "text/plain", g_sdMountMsg); return; }
+
+  if (!sdEnsureMounted()) {
+    server.send(500, "text/plain", g_sdMountMsg);
+    return;
+  }
   String dir = server.arg("dir");
   if (!dir.length()) dir = "/";
   if (!dir.startsWith("/")) dir = "/" + dir;
 
   SDFile d = sd_open(dir.c_str(), O_RDONLY);
-  if (!d) { server.send(404, "text/plain", "Dir not found"); return; }
+  if (!d) {
+    server.send(404, "text/plain", "Dir not found");
+    return;
+  }
 
   // Iterate
   String json = "[";
@@ -862,7 +899,8 @@ void handleApiSdList(WebServer& server) {
     if (name == "." || name == "..") continue;
     if (!first) json += ",";
     first = false;
-    json += "{\"name\":\"" + jsonEscape(name) + "\",\"dir\":" + String(isdir ? "true" : "false") + ",\"size\":" + String((unsigned long long)size) + "}";
+    json += "{\"name\":\"" + jsonEscape(name) + "\",\"dir\":" + String(isdir ? "true" : "false") +
+            ",\"size\":" + String((unsigned long long)size) + "}";
   }
   d.close();
   json += "]";
@@ -873,29 +911,41 @@ void handleApiSdDelete(WebServer& server) {
   // Authentication required for delete operations
   if (!checkAuth(server)) return;
   addSecurityHeaders(server);
-  
-  if (!isSDEnabled) { server.send(403, "text/plain", "SD disabled"); return; }
-  if (!sdEnsureMounted()) { server.send(500, "text/plain", sanitizeError(g_sdMountMsg)); return; }
-  
+
+  if (!isSDEnabled) {
+    server.send(403, "text/plain", "SD disabled");
+    return;
+  }
+  if (!sdEnsureMounted()) {
+    server.send(500, "text/plain", sanitizeError(g_sdMountMsg));
+    return;
+  }
+
   // Validate JSON size
   if (!isJsonSizeSafe(server.arg("plain"))) {
     server.send(413, "text/plain", "Payload too large");
     return;
   }
-  
+
   DynamicJsonDocument doc(256);
   DeserializationError err = deserializeJson(doc, server.arg("plain"));
-  if (err) { server.send(400, "text/plain", "Bad JSON"); return; }
-  
+  if (err) {
+    server.send(400, "text/plain", "Bad JSON");
+    return;
+  }
+
   String path = sanitizePath(doc["path"] | "");
-  
+
   // Additional security validation
   if (!isPathSafe(path)) {
     server.send(400, "text/plain", "Invalid path");
     return;
   }
-  
-  if (path == "/" || path.length() < 2) { server.send(400, "text/plain", "Refuse" ); return; }
+
+  if (path == "/" || path.length() < 2) {
+    server.send(400, "text/plain", "Refuse");
+    return;
+  }
   bool ok = sdRemoveRecursive(path);
   server.send(ok ? 200 : 500, "text/plain", ok ? "OK" : "Delete failed");
 }
@@ -904,34 +954,43 @@ void handleApiSdRename(WebServer& server) {
   // Authentication required for rename operations
   if (!checkAuth(server)) return;
   addSecurityHeaders(server);
-  
-  if (!isSDEnabled) { server.send(403, "text/plain", "SD disabled"); return; }
-  if (!sdEnsureMounted()) { server.send(500, "text/plain", sanitizeError(g_sdMountMsg)); return; }
-  
+
+  if (!isSDEnabled) {
+    server.send(403, "text/plain", "SD disabled");
+    return;
+  }
+  if (!sdEnsureMounted()) {
+    server.send(500, "text/plain", sanitizeError(g_sdMountMsg));
+    return;
+  }
+
   // Validate JSON size
   if (!isJsonSizeSafe(server.arg("plain"))) {
     server.send(413, "text/plain", "Payload too large");
     return;
   }
-  
+
   DynamicJsonDocument doc(512);
   DeserializationError err = deserializeJson(doc, server.arg("plain"));
-  if (err) { server.send(400, "text/plain", "Bad JSON"); return; }
-  
+  if (err) {
+    server.send(400, "text/plain", "Bad JSON");
+    return;
+  }
+
   String from = sanitizePath(doc["from"] | "");
   String to = sanitizePath(doc["to"] | "");
-  
+
   // Additional security validation
   if (!isPathSafe(from) || !isPathSafe(to)) {
     server.send(400, "text/plain", "Invalid path");
     return;
   }
-  
-  if (!from.length() || !to.length() || from == "/" || to == "/") { 
-    server.send(400, "text/plain", "Bad path"); 
-    return; 
+
+  if (!from.length() || !to.length() || from == "/" || to == "/") {
+    server.send(400, "text/plain", "Bad path");
+    return;
   }
-  
+
   bool ok = sd_rename(from, to);
   server.send(ok ? 200 : 500, "text/plain", ok ? "OK" : "Rename failed");
 }
@@ -939,21 +998,21 @@ void handleApiSdRename(WebServer& server) {
 void handleSdDownload(WebServer& server) {
   // Authentication required for file downloads
   if (!checkAuth(server)) return;
-  
-  if (!isSDEnabled) { 
+
+  if (!isSDEnabled) {
     addSecurityHeaders(server);
-    server.send(403, "text/plain", "SD disabled"); 
-    return; 
+    server.send(403, "text/plain", "SD disabled");
+    return;
   }
-  if (!sdEnsureMounted()) { 
+  if (!sdEnsureMounted()) {
     addSecurityHeaders(server);
-    server.send(500, "text/plain", sanitizeError(g_sdMountMsg)); 
-    return; 
+    server.send(500, "text/plain", sanitizeError(g_sdMountMsg));
+    return;
   }
-  
+
   String path = server.hasArg("path") ? server.arg("path") : String("");
   path = sanitizePath(path);
-  
+
   // Additional security: verify path is safe
   if (!isPathSafe(path)) {
     addSecurityHeaders(server);
@@ -962,10 +1021,10 @@ void handleSdDownload(WebServer& server) {
   }
 
   SDFile f = sd_open(path.c_str(), O_RDONLY);
-  if (!f || f.isDirectory()) { 
+  if (!f || f.isDirectory()) {
     addSecurityHeaders(server);
-    server.send(404, "text/plain", "Not found"); 
-    return; 
+    server.send(404, "text/plain", "Not found");
+    return;
   }
 
   String fn = path;
@@ -993,20 +1052,32 @@ void handleApiSdEject(WebServer& server) {
   // Authentication required for SD eject
   if (!checkAuth(server)) return;
   addSecurityHeaders(server);
-  
-  if (!isSDEnabled) { server.send(403, "text/plain", "SD disabled"); return; }
+
+  if (!isSDEnabled) {
+    server.send(403, "text/plain", "SD disabled");
+    return;
+  }
   sdUnmount();
   server.send(200, "text/plain", "Ejected");
 }
 
 void handleApiSdUploadPost(WebServer& server) {
   // Response is sent when upload completes (in handleUploadSD).
-  server.send(200, "text/plain", g_sdUploadOk ? String("OK: ") + g_sdUploadMsg : String("ERR: ") + g_sdUploadMsg);
+  server.send(200, "text/plain",
+              g_sdUploadOk ? String("OK: ") + g_sdUploadMsg : String("ERR: ") + g_sdUploadMsg);
 }
 
 void handleUploadSD(WebServer& server) {
-  if (!isSDEnabled) { g_sdUploadOk = false; g_sdUploadMsg = "SD disabled"; return; }
-  if (!sdEnsureMounted()) { g_sdUploadOk = false; g_sdUploadMsg = g_sdMountMsg; return; }
+  if (!isSDEnabled) {
+    g_sdUploadOk = false;
+    g_sdUploadMsg = "SD disabled";
+    return;
+  }
+  if (!sdEnsureMounted()) {
+    g_sdUploadOk = false;
+    g_sdUploadMsg = g_sdMountMsg;
+    return;
+  }
 
   HTTPUpload& upload = server.upload();
   if (upload.status == UPLOAD_FILE_START) {
@@ -1016,29 +1087,29 @@ void handleUploadSD(WebServer& server) {
       g_sdUploadMsg = "File too large";
       return;
     }
-    
+
     g_sdUploadOk = false;
     g_sdUploadMsg = "";
     String dir = server.hasArg("dir") ? server.arg("dir") : String("/");
     dir = sanitizePath(dir);
-    
+
     // Validate path safety
     if (!isPathSafe(dir)) {
       g_sdUploadOk = false;
       g_sdUploadMsg = "Invalid path";
       return;
     }
-    
+
     if (!dir.endsWith("/")) dir += "/";
     String fn = sanitizeBasename(upload.filename);
-    
+
     // Validate filename
     if (!isFilenameSafe(fn)) {
       g_sdUploadOk = false;
       g_sdUploadMsg = "Invalid filename";
       return;
     }
-    
+
     if (!fn.length()) fn = "upload.bin";
     g_sdUploadPath = dir + fn;
     g_sdUploadFile = sd_open(g_sdUploadPath.c_str(), O_WRONLY | O_CREAT | O_TRUNC);
@@ -1068,7 +1139,7 @@ void handleUploadSdPost(WebServer& server) {
   // Authentication required for uploads
   if (!checkAuth(server)) return;
   addSecurityHeaders(server);
-  
+
   if (g_sdUploadOk) {
     server.send(200, "text/plain", "Uploaded: " + sanitizeError(g_sdUploadMsg));
   } else {
@@ -1081,24 +1152,40 @@ void handleApiSdImportFw(WebServer& server) {
   // Authentication required for firmware import
   if (!checkAuth(server)) return;
   addSecurityHeaders(server);
-  
-  if (!isSDEnabled) { server.send(403, "text/plain", "SD disabled"); return; }
-  if (!sdEnsureMounted()) { server.send(500, "text/plain", g_sdMountMsg); return; }
+
+  if (!isSDEnabled) {
+    server.send(403, "text/plain", "SD disabled");
+    return;
+  }
+  if (!sdEnsureMounted()) {
+    server.send(500, "text/plain", g_sdMountMsg);
+    return;
+  }
 
   DynamicJsonDocument doc(512);
   DeserializationError err = deserializeJson(doc, server.arg("plain"));
-  if (err) { server.send(400, "text/plain", "Bad JSON"); return; }
+  if (err) {
+    server.send(400, "text/plain", "Bad JSON");
+    return;
+  }
 
   String sdPath = sanitizePath(doc["path"] | "");
   String slot = sanitizeBasename(doc["slot"] | "");
-  String ver  = sanitizeBasename(doc["ver"] | "");
-  if (!sdPath.length() || !slot.length() || !ver.length()) { server.send(400, "text/plain", "Missing fields"); return; }
+  String ver = sanitizeBasename(doc["ver"] | "");
+  if (!sdPath.length() || !slot.length() || !ver.length()) {
+    server.send(400, "text/plain", "Missing fields");
+    return;
+  }
 
   SDFile src = sd_open(sdPath.c_str(), O_RDONLY);
-  if (!src || src.isDirectory()) { server.send(404, "text/plain", "SD file not found"); return; }
+  if (!src || src.isDirectory()) {
+    server.send(404, "text/plain", "SD file not found");
+    return;
+  }
   src.close();
 
-  String lower = sdPath; lower.toLowerCase();
+  String lower = sdPath;
+  lower.toLowerCase();
   String outPath = fwSlotPath(slot, ver);
 
   // Clean existing slot before import
@@ -1115,15 +1202,23 @@ void handleApiSdImportFw(WebServer& server) {
     // Copy SD hex to temp file to reuse converter's FS-agnostic begin
     SDFile inSD = sd_open(sdPath.c_str(), O_RDONLY);
     File inLF = LittleFS.open(tmpIn, "w");
-    if (!inSD || !inLF) { if(inSD) inSD.close(); if(inLF) inLF.close(); server.send(500, "text/plain", "Temp open failed"); return; }
+    if (!inSD || !inLF) {
+      if (inSD) inSD.close();
+      if (inLF) inLF.close();
+      server.send(500, "text/plain", "Temp open failed");
+      return;
+    }
     uint8_t buf[2048];
     while (true) {
       size_t r = inSD.read(buf, sizeof(buf));
       if (!r) break;
-      if (inLF.write(buf, r) != r) { break; }
+      if (inLF.write(buf, r) != r) {
+        break;
+      }
       yield();
     }
-    inSD.close(); inLF.close();
+    inSD.close();
+    inLF.close();
 
     IntelHexSW8B conv;
     if (!conv.begin(LittleFS, TEMP_DIR)) {
@@ -1146,16 +1241,26 @@ void handleApiSdImportFw(WebServer& server) {
     ok = sdCopyToLittleFS(sdPath.c_str(), outPath.c_str());
   }
 
-  server.send(ok ? 200 : 500, "text/plain", ok ? String("Imported: ") + outPath : String("Failed: ") + msg);
+  server.send(ok ? 200 : 500, "text/plain",
+              ok ? String("Imported: ") + outPath : String("Failed: ") + msg);
 }
 
 void handleApiSdConvertFw(WebServer& server) {
-  if (!isSDEnabled) { server.send(403, "text/plain", "SD disabled"); return; }
-  if (!sdEnsureMounted()) { server.send(500, "text/plain", g_sdMountMsg); return; }
+  if (!isSDEnabled) {
+    server.send(403, "text/plain", "SD disabled");
+    return;
+  }
+  if (!sdEnsureMounted()) {
+    server.send(500, "text/plain", g_sdMountMsg);
+    return;
+  }
 
   DynamicJsonDocument doc(512);
   DeserializationError err = deserializeJson(doc, server.arg("plain"));
-  if (err) { server.send(400, "text/plain", "Bad JSON"); return; }
+  if (err) {
+    server.send(400, "text/plain", "Bad JSON");
+    return;
+  }
   doc["slot"] = doc["slot"] | "";
   doc["ver"] = doc["ver"] | "";
   doc["path"] = doc["path"] | "";
@@ -1163,22 +1268,26 @@ void handleApiSdConvertFw(WebServer& server) {
   handleApiSdImportFw(server);
 }
 
-#endif // SD_SUPPORT_ENABLED
+#endif  // SD_SUPPORT_ENABLED
 
 // ===================================================================================
 // MESSAGE CENTER API HANDLERS
 // ===================================================================================
 
-#include "../../core/messages/message_center.h"
 #include "../../core/messages/boot_manager.h"
+#include "../../core/messages/message_center.h"
 
 // Helper: Convert severity to string
 const char* severityToString(MessageSeverity sev) {
-  switch(sev) {
-    case MessageSeverity::INFO: return "INFO";
-    case MessageSeverity::WARN: return "WARN";
-    case MessageSeverity::ERROR: return "ERROR";
-    default: return "UNKNOWN";
+  switch (sev) {
+    case MessageSeverity::INFO:
+      return "INFO";
+    case MessageSeverity::WARN:
+      return "WARN";
+    case MessageSeverity::ERROR:
+      return "ERROR";
+    default:
+      return "UNKNOWN";
   }
 }
 
@@ -1186,13 +1295,13 @@ const char* severityToString(MessageSeverity sev) {
 // Returns: { active_count, history_count, highest_severity, sequence }
 void handleApiMessagesSummary(WebServer& server) {
   MessageSummary summary = MessageCenter::getInstance().getSummary();
-  
+
   JsonDocument doc;
   doc["active_count"] = summary.active_count;
   doc["history_count"] = summary.history_count;
   doc["highest_severity"] = severityToString(summary.highest_active_severity);
   doc["sequence"] = summary.sequence;
-  
+
   String json;
   serializeJson(doc, json);
   server.send(200, "application/json", json);
@@ -1202,10 +1311,10 @@ void handleApiMessagesSummary(WebServer& server) {
 // Returns: [ { id, timestamp, severity, source, code, title, details, count }, ... ]
 void handleApiMessagesActive(WebServer& server) {
   const auto& messages = MessageCenter::getInstance().getActiveMessages();
-  
+
   JsonDocument doc;
   JsonArray arr = doc.to<JsonArray>();
-  
+
   for (const auto& msg : messages) {
     JsonObject obj = arr.add<JsonObject>();
     obj["id"] = msg.id;
@@ -1218,7 +1327,7 @@ void handleApiMessagesActive(WebServer& server) {
     obj["details"] = msg.details;
     obj["count"] = msg.count;
   }
-  
+
   String json;
   serializeJson(doc, json);
   server.send(200, "application/json", json);
@@ -1228,10 +1337,10 @@ void handleApiMessagesActive(WebServer& server) {
 // Returns: [ { id, timestamp, severity, source, code, title, details, count }, ... ]
 void handleApiMessagesHistory(WebServer& server) {
   const auto& messages = MessageCenter::getInstance().getHistoryMessages();
-  
+
   JsonDocument doc;
   JsonArray arr = doc.to<JsonArray>();
-  
+
   for (const auto& msg : messages) {
     JsonObject obj = arr.add<JsonObject>();
     obj["id"] = msg.id;
@@ -1244,7 +1353,7 @@ void handleApiMessagesHistory(WebServer& server) {
     obj["details"] = msg.details;
     obj["count"] = msg.count;
   }
-  
+
   String json;
   serializeJson(doc, json);
   server.send(200, "application/json", json);
@@ -1258,22 +1367,22 @@ void handleApiMessagesAck(WebServer& server) {
     server.send(405, "text/plain", "Method Not Allowed");
     return;
   }
-  
+
   JsonDocument doc;
   DeserializationError err = deserializeJson(doc, server.arg("plain"));
   if (err) {
     server.send(400, "application/json", "{\"success\":false,\"error\":\"Invalid JSON\"}");
     return;
   }
-  
+
   uint32_t msg_id = doc["msg_id"] | 0;
   if (msg_id == 0) {
     server.send(400, "application/json", "{\"success\":false,\"error\":\"Missing msg_id\"}");
     return;
   }
-  
+
   bool success = MessageCenter::getInstance().acknowledge(msg_id);
-  
+
   if (success) {
     server.send(200, "application/json", "{\"success\":true}");
   } else {
@@ -1288,7 +1397,7 @@ void handleApiMessagesAckAll(WebServer& server) {
     server.send(405, "text/plain", "Method Not Allowed");
     return;
   }
-  
+
   MessageCenter::getInstance().acknowledgeAll();
   server.send(200, "application/json", "{\"success\":true}");
 }
@@ -1300,7 +1409,7 @@ void handleApiMessagesClearHistory(WebServer& server) {
     server.send(405, "text/plain", "Method Not Allowed");
     return;
   }
-  
+
   MessageCenter::getInstance().clearHistory();
   server.send(200, "application/json", "{\"success\":true}");
 }
@@ -1322,13 +1431,13 @@ void handleApiTestGauntlet(WebServer& server) {
   msg_info("test", TEST_INFO, "Gauntlet INFO Test", "This is an informational test message");
   msg_warn("test", TEST_WARN, "Gauntlet WARN Test", "This is a warning test message");
   msg_error("test", TEST_ERROR, "Gauntlet ERROR Test", "This is an error test message");
-  
+
   // Post coalescing test (5 times)
   for (int i = 0; i < 5; i++) {
     msg_warn("test", TEST_COALESCE, "Coalesce Test", "Occurrence #%d", i + 1);
     delay(100);
   }
-  
-  server.send(200, "application/json", 
-    "{\"success\":true,\"message\":\"Gauntlet test complete. Check Messages screen.\"}");
+
+  server.send(200, "application/json",
+              "{\"success\":true,\"message\":\"Gauntlet test complete. Check Messages screen.\"}");
 }

@@ -1,8 +1,8 @@
 /*
  * I2C Traffic Monitor - Implementation
- * 
+ *
  * Global variables for I2C traffic monitoring.
- * 
+ *
  * Extracted from original .ino file (lines 125-129).
  */
 

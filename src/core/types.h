@@ -27,12 +27,7 @@ enum PanelKind : uint8_t {
   PANEL_RGB_800x480
 };
 
-enum TouchKind : uint8_t {
-  TOUCH_NONE = 0,
-  TOUCH_XPT2046,
-  TOUCH_GT911,
-  TOUCH_I2C_GENERIC
-};
+enum TouchKind : uint8_t { TOUCH_NONE = 0, TOUCH_XPT2046, TOUCH_GT911, TOUCH_I2C_GENERIC };
 
 // Convert model enum to string
 const char* modelToStr(CydModel m);

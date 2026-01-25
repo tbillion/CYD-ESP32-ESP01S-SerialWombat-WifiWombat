@@ -2,14 +2,14 @@
 
 #if DISPLAY_SUPPORT_ENABLED
 
-#include "../../config/defaults.h"
-#include "../../core/messages/message_center.h"
-#include "../screens/messages_screen.h"
+#  include "../../config/defaults.h"
+#  include "../../core/messages/message_center.h"
+#  include "../screens/messages_screen.h"
 
 lv_obj_t* g_status_bar = nullptr;
 lv_obj_t* g_lbl_time = nullptr;
 lv_obj_t* g_lbl_rssi = nullptr;
-lv_obj_t* g_lbl_i2c  = nullptr;
+lv_obj_t* g_lbl_i2c = nullptr;
 lv_obj_t* g_lbl_batt = nullptr;
 lv_obj_t* g_lbl_messages = nullptr;
 
@@ -53,7 +53,7 @@ void updateMessageBadge() {
   if (!g_lbl_messages) return;
 
   MessageSummary summary = MessageCenter::getInstance().getSummary();
-  
+
   if (summary.active_count == 0) {
     lv_label_set_text(g_lbl_messages, "");
     return;
@@ -77,4 +77,4 @@ void updateMessageBadge() {
   }
   lv_obj_set_style_text_color(g_lbl_messages, color, 0);
 }
-#endif // DISPLAY_SUPPORT_ENABLED
+#endif  // DISPLAY_SUPPORT_ENABLED

@@ -1,10 +1,11 @@
 #pragma once
 
 #include <Arduino.h>
-#include <Wire.h>
-#include <WebServer.h>
+
 #include <ArduinoJson.h>
 #include <SerialWombat.h>
+#include <WebServer.h>
+#include <Wire.h>
 
 // ===================================================================================
 // I2C Manager Service
@@ -23,8 +24,14 @@ extern volatile uint32_t g_i2c_rx_count;
 extern volatile bool g_i2c_tx_blink;
 extern volatile bool g_i2c_rx_blink;
 
-inline void i2cMarkTx() { g_i2c_tx_count++; g_i2c_tx_blink = true; }
-inline void i2cMarkRx() { g_i2c_rx_count++; g_i2c_rx_blink = true; }
+inline void i2cMarkTx() {
+  g_i2c_tx_count++;
+  g_i2c_tx_blink = true;
+}
+inline void i2cMarkRx() {
+  g_i2c_rx_count++;
+  g_i2c_rx_blink = true;
+}
 
 /**
  * Variant detection result structure

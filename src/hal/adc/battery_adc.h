@@ -1,9 +1,9 @@
 /*
  * Battery ADC HAL - Header
- * 
+ *
  * Hardware abstraction for battery voltage monitoring via ADC.
  * Provides voltage reading and percentage calculation.
- * 
+ *
  * For LCDWIKI 3.5" ESP32-32E:
  *   - ADC Pin: GPIO34 (ADC1_CH6, input only)
  *   - Voltage range: Typically 3.3V - 4.2V for LiPo
