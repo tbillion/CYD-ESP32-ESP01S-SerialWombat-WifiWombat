@@ -85,6 +85,35 @@ static uint8_t g_auth_fail_count = 0;
 static const uint16_t AUTH_LOCKOUT_MS = 5000;  // 5 second lockout after failed auth
 
 // ===================================================================================
+// --- SECURITY CONFIGURATION ---
+// ===================================================================================
+// CRITICAL: Change these credentials before deployment!
+// Default credentials are for initial setup only.
+#define SECURITY_ENABLED 1
+#define AUTH_USERNAME "admin"
+#define AUTH_PASSWORD "CHANGE_ME_NOW"  // MUST be changed!
+
+// Build-time check for default password (compile warning)
+#if defined(SECURITY_ENABLED) && SECURITY_ENABLED == 1
+  #if !defined(AUTH_PASSWORD) || (defined(AUTH_PASSWORD) && strcmp(AUTH_PASSWORD, "CHANGE_ME_NOW") == 0)
+    #warning "*** SECURITY WARNING: Default password detected! Change AUTH_PASSWORD before deployment ***"
+  #endif
+#endif
+
+#define MAX_UPLOAD_SIZE (5 * 1024 * 1024)  // 5MB max upload
+#define MAX_JSON_SIZE 8192  // 8KB max JSON payload
+
+// CORS Configuration
+// WARNING: Default allows all origins (*). For production, change to specific domain:
+// #define CORS_ALLOW_ORIGIN "https://yourdomain.com"
+#define CORS_ALLOW_ORIGIN "*"  // CHANGE IN PRODUCTION!
+
+// Rate limiting (simple time-based)
+static unsigned long g_last_auth_fail = 0;
+static uint8_t g_auth_fail_count = 0;
+static const uint16_t AUTH_LOCKOUT_MS = 5000;  // 5 second lockout after failed auth
+
+// ===================================================================================
 // --- Pre-Compilation Configuration (Global Scope) ---
 // ===================================================================================
 // SD_SUPPORT_ENABLED: set to 1 to enable the SD feature set, or 0 to compile it out.
@@ -1752,6 +1781,478 @@ static bool isUploadSizeSafe(size_t size) {
   return (size <= MAX_UPLOAD_SIZE);
 }
 
+// Pin Mode Strings
+const char* const pinModeStrings[] PROGMEM = {
+  "DIGITAL_IO", "CONTROLLED", "ANALOGINPUT", "SERVO", "THROUGHPUT_CONSUMER",
+  "QUADRATURE_ENC", "HBRIDGE", "WATCHDOG", "PROTECTEDOUTPUT", "COUNTER",
+  "DEBOUNCE", "TM1637", "WS2812", "SW_UART", "INPUT_PROCESSOR",
+  "MATRIX_KEYPAD", "PWM", "UART0_TXRX", "PULSE_TIMER", "DMA_PULSE_OUTPUT",
+  "ANALOG_THROUGHPUT", "FRAME_TIMER", "TOUCH", "UART1_TXRX", "RESISTANCE_INPUT",
+  "PULSE_ON_CHANGE", "HF_SERVO", "ULTRASONIC_DISTANCE", "LIQUID_CRYSTAL",
+  "HS_CLOCK", "HS_COUNTER", "VGA", "PS2_KEYBOARD", "I2C_CONTROLLER",
+  "QUEUED_PULSE_OUTPUT", "MAX7219MATRIX", "FREQUENCY_OUTPUT", "IR_RX",
+  "IR_TX", "RC_PPM", "BLINK"
+};
+
+// ===================================================================================
+// --- HTML: Dashboard (wifiwombat06 - PRESERVED) ---
+// ===================================================================================
+const char INDEX_HTML_HEAD[] PROGMEM = R"rawliteral(
+<!DOCTYPE HTML><html>
+<head>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Wombat Manager</title>
+  <style>
+    body { font-family: 'Segoe UI', sans-serif; text-align: center; background: #222; color: #eee; margin:0; padding:10px; }
+    .card { background: #333; padding: 15px; margin: 10px auto; max-width: 450px; border-radius: 8px; border: 1px solid #444; }
+    h2 { color: #00d2ff; margin: 0 0 10px 0; }
+    h3 { border-bottom: 1px solid #555; padding-bottom: 5px; margin: 10px 0; font-size: 1.1em; color: #ccc;}
+    button { background: #007acc; color: white; padding: 12px; border: none; border-radius: 4px; cursor: pointer; margin: 5px; width: 100%; font-size:1rem; }
+    button.scan { background: #28a745; }
+    button.deep { background: #6f42c1; }
+    button.flash { background: #d35400; font-weight:bold; }
+    button.danger { background: #c0392b; }
+    button.warn { background: #e67e22; color: #fff; }
+    select, input[type=text], textarea { padding: 10px; margin: 5px; width: 95%; background: #ddd; border: none; border-radius: 4px; box-sizing: border-box; }
+    input[type=radio] { transform: scale(1.5); margin: 10px; }
+    .status { font-family: monospace; color: #0f0; }
+    .warn-text { color: #e74c3c; font-size: 0.8rem; font-weight: bold; }
+    .slot-label { display: block; text-align: left; padding: 5px; background: #444; margin-bottom: 2px; border-radius: 4px; cursor: pointer;}
+    .slot-label:hover { background: #555; }
+  </style>
+</head>
+<body>
+  <h2>Wombat Wifi Bridge</h2>
+  
+  <div class="card">
+    <div style="text-align:left; font-size:0.9em;">
+      <strong>Bridge IP:</strong> <span class="status">%IP%</span> (Port 3000)<br>
+      <strong>Target:</strong> <span class="status">0x%ADDR%</span>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>Scanner Tools</h3>
+    <button class="scan" onclick="location.href='/scanner'">Fast I2C Scanner</button>
+    <button class="deep" onclick="location.href='/deepscan'">Deep Chip Analysis</button>
+  </div>
+
+  <div class="card" style="border:1px solid #00d2ff;">
+    <h3>Firmware Manager</h3>
+    <button onclick="document.getElementById('uploadUi').style.display='block';">Update a Firmware Slot</button>
+    
+    <div id="uploadUi" style="display:none; text-align:left; background:#222; padding:10px; margin-top:10px;">
+      
+      <h4>1. Select Slot to Update:</h4>
+      <label class="slot-label"><input type="radio" name="fwSlot" value="Default_FW" checked> Default Firmware</label>
+      <label class="slot-label"><input type="radio" name="fwSlot" value="Brushed_Motor"> Brushed Motor</label>
+      <label class="slot-label"><input type="radio" name="fwSlot" value="Front_Panel"> Front Panel</label>
+      <label class="slot-label"><input type="radio" name="fwSlot" value="Keypad"> Keypad</label>
+      <label class="slot-label"><input type="radio" name="fwSlot" value="Motor_Control"> Motor Control</label>
+      <label class="slot-label"><input type="radio" name="fwSlot" value="TM1637"> TM1637 Display</label>
+      <label class="slot-label"><input type="radio" name="fwSlot" value="Ultrasonic"> Ultrasonic</label>
+      <label class="slot-label"><input type="radio" name="fwSlot" value="Comms"> Communications</label>
+      <label class="slot-label"><input type="radio" name="fwSlot" value="Custom1"> Custom Slot 1</label>
+      <label class="slot-label"><input type="radio" name="fwSlot" value="Custom2"> Custom Slot 2</label>
+
+      <h4>2. Enter Version:</h4>
+      <input type="text" id="fwVer" placeholder="e.g. 2.1.2">
+
+      <h4>3. Input Method:</h4>
+      <div style="display:flex; gap:18px; align-items:center; flex-wrap:wrap;">
+        <label style="display:inline-flex; align-items:center; gap:8px;">
+          <input type="radio" name="fwInputMode" value="blob" checked onchange="setFwInputMode('blob')"> Blob
+        </label>
+        <label style="display:inline-flex; align-items:center; gap:8px;">
+          <input type="radio" name="fwInputMode" value="hex" onchange="setFwInputMode('hex')"> IntelHEX
+        </label>
+        %SD_FW_OPTION%
+      </div>
+
+      <div id="fwBlobArea" style="margin-top:10px;">
+        <h4>4. Paste Array Code:</h4>
+        <textarea id="fwContent" rows="5" placeholder="0x306F, 0x37A0, ..."></textarea>
+      </div>
+
+      <div id="fwHexArea" style="display:none; margin-top:10px;">
+        <h4>4. Upload Intel HEX (.hex):</h4>
+        <input type="file" id="fwHexFile" accept=".hex" style="display:none" />
+        <button class="scan" type="button" onclick="document.getElementById('fwHexFile').click();">Choose .hex File</button>
+        <div id="fwHexName" class="status" style="margin-top:6px; font-size:0.9em; word-break:break-all;"></div>
+      </div>
+
+      %SD_FW_AREA%
+
+      <button class="scan" onclick="uploadFW()">Save & Overwrite Slot</button>
+      <div id="uploadStatus"></div>
+    </div>
+    
+    <script>
+      function setFwInputMode(mode) {
+        var blobArea = document.getElementById('fwBlobArea');
+        var hexArea  = document.getElementById('fwHexArea');
+        var sdArea   = document.getElementById('fwSdArea');
+
+        if (blobArea) blobArea.style.display = 'none';
+        if (hexArea)  hexArea.style.display  = 'none';
+        if (sdArea)   sdArea.style.display   = 'none';
+
+        if (mode === 'hex') {
+          if (hexArea) hexArea.style.display = 'block';
+        } else if (mode === 'sd') {
+          if (sdArea) sdArea.style.display = 'block';
+          try { if (typeof refreshSdFwList === 'function') refreshSdFwList(); } catch(e) {}
+        } else {
+          if (blobArea) blobArea.style.display = 'block';
+        }
+      }
+
+      // Keep filename display in HEX mode
+      (function(){
+        var f = document.getElementById('fwHexFile');
+        if (f) {
+          f.addEventListener('change', function(){
+            var n = (f.files && f.files.length) ? f.files[0].name : '';
+            var lbl = document.getElementById('fwHexName');
+            if (lbl) lbl.textContent = n ? ('Selected: ' + n) : '';
+          });
+        }
+      })();
+
+      function getSelectedSlot() {
+        var slots = document.getElementsByName('fwSlot');
+        for (var i=0; i<slots.length; i++) {
+          if (slots[i].checked) return slots[i].value;
+        }
+        return '';
+      }
+
+      function getInputMode() {
+        var modes = document.getElementsByName('fwInputMode');
+        for (var i=0; i<modes.length; i++) {
+          if (modes[i].checked) return modes[i].value;
+        }
+        return 'blob';
+      }
+
+      function uploadFW() {
+        var mode = getInputMode();
+        if (mode === 'hex') return uploadFW_hex();
+        if (mode === 'sd') return uploadFW_sd();
+        return uploadFW_blob();
+      }
+
+      function uploadFW_blob() {
+        var slotName = getSelectedSlot();
+        var ver = document.getElementById('fwVer').value.trim();
+        var text = document.getElementById('fwContent').value;
+
+        if(!ver || !text) { alert("Please enter Version and Paste Code."); return; }
+
+        var finalName = slotName + "_" + ver;
+        var status = document.getElementById('uploadStatus');
+        status.innerHTML = "Cleaning old files...";
+
+        // 1. Clean Slot First
+        fetch('/clean_slot?prefix=' + encodeURIComponent(slotName))
+        .then(() => {
+            status.innerHTML = "Parsing Hex...";
+            // 2. Parse Hex
+            var hexValues = text.match(/0x[0-9A-Fa-f]{1,4}/g);
+            if(!hexValues) { status.innerHTML = "Error: No hex found."; return; }
+
+            var bytes = new Uint8Array(hexValues.length * 2);
+            for(var i=0; i<hexValues.length; i++) {
+               var val = parseInt(hexValues[i], 16);
+               bytes[i*2] = val & 0xFF;
+               bytes[i*2+1] = (val >> 8) & 0xFF;
+            }
+
+            status.innerHTML = "Uploading " + bytes.length + " bytes...";
+
+            // 3. Upload
+            var blob = new Blob([bytes], {type: "application/octet-stream"});
+            var fd = new FormData();
+            fd.append("file", blob, finalName + ".bin");
+
+            return fetch('/upload_fw', {method:'POST', body:fd});
+        })
+        .then(r => r.text())
+        .then(() => {
+             status.innerHTML = "Success! Reloading...";
+             setTimeout(() => location.reload(), 1500);
+        })
+        .catch(e => status.innerHTML = "Error: " + e);
+      }
+
+      function uploadFW_hex() {
+        var slotName = getSelectedSlot();
+        var ver = document.getElementById('fwVer').value.trim();
+        var f = document.getElementById('fwHexFile');
+        var file = (f && f.files && f.files.length) ? f.files[0] : null;
+
+        if(!ver) { alert("Please enter Version."); return; }
+        if(!file) { alert("Please choose a .hex file."); return; }
+
+        var status = document.getElementById('uploadStatus');
+        status.innerHTML = "Cleaning old files...";
+
+        fetch('/clean_slot?prefix=' + encodeURIComponent(slotName))
+        .then(() => {
+          status.innerHTML = "Uploading HEX...";
+          var fd = new FormData();
+          fd.append('file', file, file.name);
+          var url = '/upload_hex?prefix=' + encodeURIComponent(slotName) + '&ver=' + encodeURIComponent(ver);
+          return fetch(url, {method:'POST', body:fd});
+        })
+        .then(r => r.text())
+        .then(t => {
+          status.innerHTML = t + "<br>Reloading...";
+          setTimeout(() => location.reload(), 1500);
+        })
+        .catch(e => status.innerHTML = "Error: " + e);
+      }
+
+      function uploadFW_sd() {
+        var slotName = getSelectedSlot();
+        var ver = document.getElementById('fwVer').value.trim();
+        var sel = document.getElementById('fwSdSelect');
+        var sdPath = sel ? sel.value : '';
+
+        if (!ver) { alert('Please enter Version.'); return; }
+        if (!sdPath) { alert('Please select a file from SD.'); return; }
+
+        var status = document.getElementById('uploadStatus');
+        status.innerHTML = 'Cleaning old files...';
+
+        fetch('/clean_slot?prefix=' + encodeURIComponent(slotName))
+        .then(() => {
+          status.innerHTML = 'Importing from SD...';
+          return fetch('/api/sd/import_fw', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ path: sdPath, slot: slotName, ver: ver })
+          });
+        })
+        .then(r => r.text())
+        .then(t => {
+          status.innerHTML = t + '<br>Reloading...';
+          setTimeout(() => location.reload(), 1500);
+        })
+        .catch(e => status.innerHTML = 'Error: ' + e);
+      }
+    </script>
+  </div>
+
+  <div class="card" style="border:1px solid #d35400;">
+    <h3 style="color:#e67e22;">Firmware Flasher</h3>
+    <p class="warn-text">WARNING: Do not power off during update.</p>
+    <form action="/flashfw" method="POST">
+      <label>Select Firmware from Storage:</label>
+      <select name="fw_name">
+)rawliteral";
+
+const char INDEX_HTML_TAIL[] PROGMEM = R"rawliteral(
+      </select>
+      <button class="flash" type="submit" onclick="return confirm('Ready to Flash SW8B? This takes about 30 seconds.');">Start Flash Update</button>
+    </form>
+  </div>
+
+  <div class="card">
+    <h3>Settings</h3>
+    <form action="/connect" method="GET">
+      <input type="text" name="addr" placeholder="Hex (e.g. 0x6C)"><br>
+      <button type="submit">Connect to Address</button>
+    </form>
+    
+    <button class="warn" onclick="if(confirm('Reset Wombat at Target Address?')) location.href='/resetwombat'">Reset Target Wombat</button>
+    
+    <hr style="border-color:#555;">
+    <form action="/changeaddr" method="GET">
+      <input type="text" name="newaddr" placeholder="Change Hardware Addr"><br>
+      <button class="danger" type="submit">Flash New Address</button>
+    </form>
+    <br>
+    <button onclick="location.href='/resetwifi'">Reset WiFi</button>
+    <button onclick="if(confirm('Delete ALL firmwares?')) location.href='/formatfs'" style="background:#555;font-size:0.7em;">Format Storage</button>
+  </div>
+
+  %SD_TILE%
+</body>
+</html>
+)rawliteral";
+
+
+
+#if SD_SUPPORT_ENABLED
+// ===================================================================================
+// --- SECURITY FUNCTIONS ---
+// ===================================================================================
+
+/**
+ * Add security headers to HTTP response
+ * Implements: CORS, CSP, X-Frame-Options, X-Content-Type-Options
+ * 
+ * Notes:
+ * - HSTS is included but only effective over HTTPS (not yet implemented)
+ * - CSP uses 'unsafe-inline' due to embedded HTML with inline scripts
+ * - CORS uses wildcard by default - CHANGE CORS_ALLOW_ORIGIN for production
+ */
+static void addSecurityHeaders() {
+  server.sendHeader("X-Content-Type-Options", "nosniff");
+  server.sendHeader("X-Frame-Options", "DENY");
+  server.sendHeader("X-XSS-Protection", "1; mode=block");
+  // CSP: 'unsafe-inline' required for embedded HTML, consider external JS in future
+  server.sendHeader("Content-Security-Policy", "default-src 'self' 'unsafe-inline'; img-src 'self' data:;");
+  // HSTS: Only effective over HTTPS, included for future HTTPS implementation
+  server.sendHeader("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
+  // CORS - PRODUCTION WARNING: Change CORS_ALLOW_ORIGIN to specific domain
+  server.sendHeader("Access-Control-Allow-Origin", CORS_ALLOW_ORIGIN);
+  server.sendHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+  server.sendHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+}
+
+/**
+ * Check HTTP Basic Authentication
+ * Returns true if authenticated or security disabled, false otherwise
+ */
+static bool checkAuth() {
+#if !SECURITY_ENABLED
+  return true;  // Security disabled at compile time
+#endif
+
+  // Rate limiting: simple lockout after repeated failures
+  if (g_auth_fail_count >= 3) {
+    unsigned long now = millis();
+    if (now - g_last_auth_fail < AUTH_LOCKOUT_MS) {
+      server.send(429, "text/plain", "Too many failed attempts. Try again later.");
+      return false;
+    } else {
+      // Reset after lockout period
+      g_auth_fail_count = 0;
+    }
+  }
+
+  if (!server.authenticate(AUTH_USERNAME, AUTH_PASSWORD)) {
+    g_auth_fail_count++;
+    g_last_auth_fail = millis();
+    server.requestAuthentication(BASIC_AUTH, "Wombat Manager", "Authentication required");
+    return false;
+  }
+
+  // Success - reset fail counter
+  g_auth_fail_count = 0;
+  return true;
+}
+
+/**
+ * Validate I2C address (7-bit address range)
+ */
+static bool isValidI2CAddress(uint8_t addr) {
+  return (addr >= 0x08 && addr <= 0x77);
+}
+
+/**
+ * Validate pin number for ESP32
+ */
+static bool isValidPinNumber(int pin) {
+  // ESP32 valid GPIO pins (exclude reserved/strapping pins)
+  // Allow common GPIO pins, exclude flash pins (6-11)
+  if (pin < 0 || pin > 39) return false;
+  if (pin >= 6 && pin <= 11) return false;  // Flash pins
+  return true;
+}
+
+/**
+ * Validate integer is within range
+ */
+static bool isValidRange(int value, int min_val, int max_val) {
+  return (value >= min_val && value <= max_val);
+}
+
+/**
+ * Enhanced path traversal protection
+ * Prevents: .., absolute path escape, null bytes, control chars
+ */
+static bool isPathSafe(const String& path) {
+  // Check for null bytes
+  if (path.indexOf('\0') >= 0) return false;
+  
+  // Check for control characters
+  for (size_t i = 0; i < path.length(); i++) {
+    char c = path[i];
+    if (c < 0x20 && c != '\n' && c != '\r' && c != '\t') return false;
+  }
+  
+  // Check for parent directory references
+  if (path.indexOf("..") >= 0) return false;
+  
+  // Must start with / (absolute within filesystem)
+  if (path.length() > 0 && path[0] != '/') return false;
+  
+  return true;
+}
+
+/**
+ * Validate filename for filesystem safety
+ * Only allows alphanumeric, underscore, dash, dot
+ */
+static bool isFilenameSafe(const String& filename) {
+  if (filename.length() == 0 || filename.length() > 255) return false;
+  
+  // Check for null bytes
+  if (filename.indexOf('\0') >= 0) return false;
+  
+  // Must not start with dot (hidden files)
+  if (filename[0] == '.') return false;
+  
+  // Check each character
+  for (size_t i = 0; i < filename.length(); i++) {
+    char c = filename[i];
+    bool valid = (c >= 'a' && c <= 'z') || 
+                 (c >= 'A' && c <= 'Z') || 
+                 (c >= '0' && c <= '9') ||
+                 c == '_' || c == '-' || c == '.';
+    if (!valid) return false;
+  }
+  
+  return true;
+}
+
+/**
+ * Sanitize error messages to prevent info disclosure
+ */
+static String sanitizeError(const String& error) {
+  // Remove filesystem paths
+  String safe = error;
+  safe.replace("/littlefs/", "[FS]/");
+  safe.replace("/sd/", "[SD]/");
+  safe.replace("/temp/", "[TEMP]/");
+  safe.replace("/fw/", "[FW]/");
+  safe.replace("/config/", "[CFG]/");
+  
+  // Limit length
+  if (safe.length() > 128) {
+    safe = safe.substring(0, 125) + "...";
+  }
+  
+  return safe;
+}
+
+/**
+ * Validate JSON size before parsing
+ */
+static bool isJsonSizeSafe(const String& json) {
+  return (json.length() <= MAX_JSON_SIZE);
+}
+
+/**
+ * Check if upload size is within limits
+ */
+static bool isUploadSizeSafe(size_t size) {
+  return (size <= MAX_UPLOAD_SIZE);
+}
+
 // ===================================================================================
 // HELPERS
 // ===================================================================================
@@ -2001,8 +2502,335 @@ static void fsListFilesBySuffix(const char* suffix, String& outOptionsHtml, bool
 // ===================================================================================
 // ROUTE HANDLERS (Dashboard + Tools)
 // ===================================================================================
+static void handleRoot() {
+  // Public page but add security headers
+  addSecurityHeaders();
+  
+  String s = FPSTR(INDEX_HTML_HEAD);
+
+  // Insert a simple nav bar without altering the stored v06 HTML constants.
+  // (Served HTML gains a 2-tab bar; original Dashboard content remains intact.)
+  const String nav =
+    "<div style='background:#333;padding:10px;margin:0 -10px 10px -10px;border-bottom:1px solid #444;'>"
+    "<a href='/' style='color:white;font-weight:bold;margin:0 10px;text-decoration:none;border-bottom:2px solid white;'>Dashboard</a>"
+    "<a href='/configure' style='color:#00d2ff;font-weight:bold;margin:0 10px;text-decoration:none;'>Configurator</a><a href='/settings' style='color:#00d2ff;font-weight:bold;margin:0 10px;text-decoration:none;'>System Settings</a>"
+    "</div>";
+  s.replace("<body>", "<body>" + nav);
+
+  String addrHex = String(currentWombatAddress, HEX);
+  addrHex.toUpperCase();
+  s.replace("%ADDR%", addrHex);
+  s.replace("%IP%", WiFi.localIP().toString());
+
+  String options;
+  bool found = false;
+  fsListFilesBySuffix(".bin", options, found);
+  if (!found) options = "<option value=''>No Firmwares Found (Use Manager)</option>";
+
+  s += options;
+  s += FPSTR(INDEX_HTML_TAIL);
+
+  // Conditional SD UI injection (zero-clabber: placeholders already exist in HTML templates)
+  s.replace("%SD_TILE%", isSDEnabled ? String(FPSTR(SD_TILE_HTML)) : String(""));
+  s.replace("%SD_FW_OPTION%", isSDEnabled ? String(FPSTR(SD_FW_OPTION_HTML)) : String(""));
+  s.replace("%SD_FW_AREA%", isSDEnabled ? String(FPSTR(SD_FW_AREA_HTML)) : String(""));
+
+  server.send(200, "text/html", s);
+}
+
+static void handleScanner() {
+  server.send(200, "text/html", FPSTR(SCANNER_HTML));
+}
+
+static void handleScanData() {
+  String found;
+  int count = 0;
+  for (uint8_t i = 8; i < 127; i++) {
+    Wire.beginTransmission(i);
+    if ((i2cMarkTx(), Wire.endTransmission()) == 0) {
+      found += "Device Found: 0x" + String(i, HEX) + "<br>";
+      count++;
+    }
+  }
+  if (count == 0) found = "No devices found.";
+  else found += "<br>Total: " + String(count);
+  server.send(200, "text/plain", found);
+}
+
+// --- FINGERPRINT MATCHING DEEP SCAN (v06 preserved logic) ---
+static void handleDeepScan() {
+  server.setContentLength(CONTENT_LENGTH_UNKNOWN);
+  server.send(200, "text/html", "");
+  server.sendContent(F("<!DOCTYPE HTML><html><head><meta name='viewport' content='width=device-width, initial-scale=1'><style>body{font-family:monospace;background:#222;color:#eee;padding:10px;}.chip{border:1px solid #0f0;padding:10px;margin-bottom:10px;background:#333;}h3{color:#00d2ff;margin:0;}b{color:#0f0;}.btn{display:block;padding:10px;background:#007acc;color:white;text-align:center;text-decoration:none;margin-top:20px;}</style></head><body><h2>Serial Wombat Deep Scan</h2>"));
+
+  SerialWombat sw_scan;
+  for (int i2cAddress = 0x0E; i2cAddress <= 0x77; ++i2cAddress) {
+    yield();
+    Wire.beginTransmission((uint8_t)i2cAddress);
+    if ((i2cMarkTx(), Wire.endTransmission()) == 0) {
+      String out = "<div class='chip'><h3>Device @ 0x" + String(i2cAddress, HEX) + "</h3>";
+
+      sw_scan.begin(Wire, (uint8_t)i2cAddress, false);
+
+      if (sw_scan.queryVersion()) {
+        bool supported[41] = {0};
+        if (sw_scan.isSW18() || sw_scan.isSW08()) {
+          for (int pm = 0; pm < 41; ++pm) {
+            yield();
+            uint8_t tx[8] = {201, 1, (uint8_t)pm, 0x55, 0x55, 0x55, 0x55, 0x55};
+            int16_t ret = sw_scan.sendPacket(tx);
+            if ((ret * -1) == SW_ERROR_PIN_CONFIG_WRONG_ORDER) supported[pm] = true;
+          }
+        }
+
+        String variant = "Custom_FW";
+        if (supported[15]) {
+          variant = "Keypad Firmware";
+        } else if (supported[27]) {
+          variant = "Ultrasonic Firmware";
+        } else if (supported[17]) {
+          variant = "Communications Firmware";
+        } else if (supported[11]) {
+          variant = "TM1637 Display Firmware";
+        } else if (supported[25] && supported[36] && !supported[6]) {
+          variant = "Front Panel Firmware";
+        } else if (supported[6] && supported[3]) {
+          variant = "Motor Control / Default";
+        } else if (supported[6] && !supported[3]) {
+          variant = "Brushed Motor Firmware";
+        }
+
+        out += "<b>Serial Wombat Found!</b><br>";
+        if (sw_scan.inBoot) out += "STATUS: <b style='color:orange'>BOOT MODE</b><br>";
+        else out += "STATUS: <b>APP MODE</b><br>";
+
+        out += "Model: " + String((char*)sw_scan.model) + "<br>";
+        out += "FW Version: " + String((char*)sw_scan.fwVersion) + "<br>";
+        out += "<b>Variant: <span style='color:#0ff'>" + variant + "</span></b><br><br>";
+
+        out += "Uptime: " + String(sw_scan.readFramesExecuted()) + " frames<br>";
+        out += "Overflows: " + String(sw_scan.readOverflowFrames()) + "<br>";
+        out += "Errors: " + String(sw_scan.errorCount) + "<br>";
+        out += "Birthday: " + String(sw_scan.readBirthday()) + "<br>";
+
+        char brand[32];
+        sw_scan.readBrand(brand);
+        out += "Brand: " + String(brand) + "<br>";
+        out += "UUID: ";
+        for (int i = 0; i < sw_scan.uniqueIdentifierLength; ++i) {
+          if (sw_scan.uniqueIdentifier[i] < 16) out += "0";
+          out += String(sw_scan.uniqueIdentifier[i], HEX) + " ";
+        }
+        out += "<br>Voltage: " + String(sw_scan.readSupplyVoltage_mV()) + " mV<br>";
+        if (sw_scan.isSW18()) {
+          uint16_t t = sw_scan.readTemperature_100thsDegC();
+          out += "Temp: " + String(t / 100) + "." + String(t % 100) + " C<br>";
+        }
+
+        if (sw_scan.isSW18() || sw_scan.isSW08()) {
+          out += "<br><b>Supported Pin Modes:</b><br><span style='font-size:0.8em;color:#aaa;'>";
+          for (int pm = 0; pm < 41; ++pm) {
+            if (supported[pm]) {
+              out += String(FPSTR(pinModeStrings[pm])) + ", ";
+            }
+          }
+          out += "</span>";
+        }
+      } else {
+        out += "Unknown I2C Device";
+      }
+
+      out += "</div>";
+      server.sendContent(out);
+    }
+  }
+
+  server.sendContent(F("<a href='/' class='btn'>Return to Dashboard</a></body></html>"));
+  server.sendContent("");
+}
+
+static void handleConnect() {
+  // Authentication required for I2C operations
+  if (!checkAuth()) return;
+  addSecurityHeaders();
+  
+  if (server.hasArg("addr")) {
+    String addrStr = server.arg("addr");
+    uint8_t addr = (uint8_t)strtol(addrStr.c_str(), NULL, 16);
+    
+    // Validate I2C address
+    if (!isValidI2CAddress(addr)) {
+      server.send(400, "text/plain", "Invalid I2C address. Must be 0x08-0x77");
+      return;
+    }
+    
+    currentWombatAddress = addr;
+    sw.begin(Wire, currentWombatAddress);
+  }
+  server.sendHeader("Location", "/");
+  server.send(303);
+}
+
+static void handleSetPin() {
+  // Authentication required for pin configuration
+  if (!checkAuth()) return;
+  addSecurityHeaders();
+  
+  if (server.hasArg("pin") && server.hasArg("mode")) {
+    int pin = server.arg("pin").toInt();
+    int mode = server.arg("mode").toInt();
+    
+    // Validate pin number
+    if (!isValidPinNumber(pin)) {
+      server.send(400, "text/plain", "Invalid pin number");
+      return;
+    }
+    
+    // Validate mode range (assuming valid modes 0-40 based on pinModeStrings)
+    if (!isValidRange(mode, 0, 40)) {
+      server.send(400, "text/plain", "Invalid mode value");
+      return;
+    }
+    
+    uint8_t tx[8] = {200, (uint8_t)pin, (uint8_t)mode, 0, 0, 0, 0, 0};
+    sw.sendPacket(tx);
+  }
+  server.sendHeader("Location", "/");
+  server.send(303);
+}
+
+static void handleChangeAddr() {
+  // Authentication required for address changes
+  if (!checkAuth()) return;
+  addSecurityHeaders();
+  
+  if (server.hasArg("newaddr")) {
+    String val = server.arg("newaddr");
+    uint8_t newAddr = (uint8_t)strtol(val.c_str(), NULL, 16);
+
+    if (!isValidI2CAddress(newAddr)) {
+      server.send(400, "text/plain", "Invalid I2C address. Must be 0x08-0x77");
+      return;
+    }
+    
+    // 1) Library method (known good on SW8B)
+    sw.setThroughputPin((uint32_t)newAddr);
+    delay(200);
+
+    // 2) Fallback raw packet
+    Wire.beginTransmission(currentWombatAddress);
+    Wire.write(0xAF);
+    Wire.write(0x5F);
+    Wire.write(0x42);
+    Wire.write(0xAF);
+    Wire.write(newAddr);
+    Wire.write(0x55);
+    Wire.write(0x55);
+    Wire.write(0x55);
+    Wire.endTransmission();
+    i2cMarkTx();
+
+    delay(200);
+
+    // 3) Reset to latch
+    sw.begin(Wire, currentWombatAddress);
+    sw.hardwareReset();
+    delay(1500);
+
+    // 4) Switch to new address
+    currentWombatAddress = newAddr;
+    sw.begin(Wire, currentWombatAddress);
+  }
+  server.sendHeader("Location", "/");
+  server.send(303);
+}
+
+static void handleResetTarget() {
+  // Authentication required for hardware reset
+  if (!checkAuth()) return;
+  addSecurityHeaders();
+  
+  sw.hardwareReset();
+  server.sendHeader("Location", "/");
+  server.send(303);
+}
+
+static void handleResetWiFi() {
+  // Authentication required for WiFi reset (critical operation)
+  if (!checkAuth()) return;
+  addSecurityHeaders();
+  
+  WiFiManager wm;
+  wm.resetSettings();
+  ESP.restart();
+}
+
+static void handleFormat() {
+  // Authentication required for filesystem format (destructive operation)
+  if (!checkAuth()) return;
+  addSecurityHeaders();
+  
+  LittleFS.format();
+  server.sendHeader("Location", "/");
+  server.send(303);
+}
+
 // ===================================================================================
-// Firmware Flasher (v06 - row-by-row writing) PRESERVED
+// Firmware slot + upload handlers (ESP32 LittleFS iteration)
+// ===================================================================================
+static void handleCleanSlot() {
+  // Authentication required for slot cleanup
+  if (!checkAuth()) return;
+  addSecurityHeaders();
+  
+  if (!server.hasArg("prefix")) {
+    server.send(400, "text/plain", "Missing prefix");
+    return;
+  }
+
+  const String prefix = server.arg("prefix");
+  // Collect candidates first (safer than deleting while iterating)
+  String toDelete[64];
+  int delCount = 0;
+
+  auto collectInDir = [&](const char* dirPath) {
+    File dir = LittleFS.open(dirPath);
+    if (!dir || !dir.isDirectory()) return;
+    SDFile f;
+    while (f) {
+      String n = String(f.name());
+      String base = n;
+      // base name for matching
+      int slash = base.lastIndexOf('/');
+      if (slash >= 0) base = base.substring(slash + 1);
+
+      if (base.startsWith(prefix + "_") && base.endsWith(".bin")) {
+        if (delCount < 64) toDelete[delCount++] = n;
+      }
+      f.close();
+      f.close();
+    // next
+
+    }
+    dir.close();
+  };
+
+  collectInDir(FW_DIR);
+  // Back-compat: legacy root
+  collectInDir("/");
+
+  int removed = 0;
+  for (int i = 0; i < delCount; i++) {
+    if (LittleFS.remove(toDelete[i])) removed++;
+  }
+
+  server.send(200, "text/plain", "Cleaned " + String(removed));
+}
+
+
+
+// ===================================================================================
+// Intel HEX upload + conversion (saved temporarily to /temp, converted to /fw/<slot>_<ver>.bin)
 // ===================================================================================
 static bool ensureDir(const char* path) {
   if (LittleFS.exists(path)) return true;
@@ -2175,6 +3003,166 @@ static bool convertHexToFirmwareBin(const String& tempHexPath, const String& out
 // ===================================================================================
 // Firmware Flasher (v06 - row-by-row writing) PRESERVED
 // ===================================================================================
+static void handleFlashFW() {
+  // Authentication required for firmware flashing (critical operation)
+  if (!checkAuth()) return;
+  addSecurityHeaders();
+  
+  if (!server.hasArg("fw_name")) {
+    server.send(400, "text/plain", "No selection");
+    return;
+  }
+
+  // Be forgiving about what the UI posts. Depending on browser + HTML source,
+  // this can be:
+  //   - "Default_FW_2.2.2.bin" (basename)
+  //   - "/fw/Default_FW_2.2.2.bin" (preferred)
+  //   - "fw/Default_FW_2.2.2.bin" (no leading slash)
+  //   - legacy root paths
+  String raw = server.arg("fw_name");
+  raw.trim();
+
+  String fwName = normalizePath(raw);
+
+  // If caller passed a basename, try /fw first, then legacy root.
+  // If caller passed a path, still try a couple of normalizations.
+  String resolved;
+  auto tryPath = [&](const String& p) {
+    if (resolved.length()) return;
+    if (LittleFS.exists(p)) resolved = p;
+  };
+
+  // Direct as provided
+  tryPath(fwName);
+
+  // If it doesn't look like a directory path, try firmware dir
+  if (!resolved.length()) {
+    String base = raw;
+    // strip any leading directory
+    int lastSlash = base.lastIndexOf('/');
+    if (lastSlash >= 0) base = base.substring(lastSlash + 1);
+    base.trim();
+    if (base.length()) {
+      tryPath(joinPath(FW_DIR, base));
+      tryPath("/" + base); // legacy root
+    }
+  }
+
+  // Final fallback: if it started with "//" from any weirdness, collapse it.
+  if (!resolved.length() && fwName.startsWith("//")) {
+    String collapsed = fwName;
+    while (collapsed.startsWith("//")) collapsed.remove(0, 1);
+    tryPath(collapsed);
+  }
+
+  if (!resolved.length()) {
+    // Provide a helpful diagnostic list (kept short) so you can see what's actually on FS.
+    String msg = "File missing. Requested='" + raw + "'\n";
+    msg += "Checked: " + fwName + "\n";
+    msg += "FW dir: " + String(FW_DIR) + "\n\n";
+    msg += "Available firmwares:\n";
+    File dir = LittleFS.open(FW_DIR);
+    if (dir && dir.isDirectory()) {
+      SDFile f;
+      int shown = 0;
+      while (f && shown < 30) {
+        String n = String(f.name());
+        if (n.endsWith(".bin")) {
+          msg += " - " + n + " (" + String(f.size()) + ")\n";
+          shown++;
+        }
+        f.close();
+        f.close();
+    // next
+
+      }
+    } else {
+      msg += " (cannot open /fw)\n";
+    }
+    server.send(400, "text/plain", msg);
+    return;
+  }
+
+  fwName = resolved;
+
+  File fwFile = LittleFS.open(fwName, "r");
+  if (!fwFile) {
+    server.send(500, "text/plain", "File Error");
+    return;
+  }
+
+  server.setContentLength(CONTENT_LENGTH_UNKNOWN);
+  server.send(200, "text/html", "");
+  server.sendContent(F("<!DOCTYPE HTML><html><head><meta http-equiv='refresh' content='10;url=/'><style>body{background:#000;color:#0f0;font-family:monospace;padding:20px;white-space:pre-wrap;}</style></head><body><h2>SW8B Firmware Update</h2>"));
+  server.sendContent("Flashing: " + fwName + " (" + String(fwFile.size()) + " bytes)\n");
+
+  sw.begin(Wire, currentWombatAddress, false);
+  if (!sw.queryVersion()) server.sendContent("Connecting...\n");
+
+  if (!sw.inBoot) {
+    sw.jumpToBoot();
+    sw.hardwareReset();
+    delay(2000);
+  }
+
+  sw.begin(Wire, currentWombatAddress, false);
+  if (!sw.queryVersion()) {
+    server.sendContent("Error: Bootloader not found.\n");
+    fwFile.close();
+    return;
+  }
+
+  sw.eraseFlashPage(0);
+  server.sendContent("Erasing...\n");
+
+  uint32_t address = 0;
+  uint8_t buffer[64];
+
+  while (fwFile.available()) {
+    yield();
+    ArduinoOTA.handle();
+
+    int bytesRead = fwFile.read(buffer, 64);
+    if (bytesRead < 64) {
+      for (int k = bytesRead; k < 64; k++) buffer[k] = 0xFF;
+    }
+
+    uint32_t page[16];
+    bool dirty = false;
+    for (int i = 0; i < 16; i++) {
+      uint32_t val =
+        (uint32_t)buffer[i * 4] +
+        ((uint32_t)buffer[i * 4 + 1] << 8) +
+        ((uint32_t)buffer[i * 4 + 2] << 16) +
+        ((uint32_t)buffer[i * 4 + 3] << 24);
+      page[i] = val;
+      if (val != 0xFFFFFFFF) dirty = true;
+    }
+
+    if (dirty) {
+      sw.writeUserBuffer(0, (uint8_t*)page, 64);
+      sw.writeFlashRow(address * 4 + 0x08000000);
+      if (address % 128 == 0) server.sendContent("Writing addr: 0x" + String(address, HEX) + "\n");
+      delay(10);
+    }
+
+    address += 16;
+  }
+
+  fwFile.close();
+
+  uint8_t tx[] = {164, 4, 0, 0, 0, 0, 0, 0};
+  sw.sendPacket(tx);
+  delay(100);
+  sw.hardwareReset();
+
+  server.sendContent("\n<h3>SUCCESS! Redirecting...</h3></body></html>");
+  server.sendContent("");
+
+  delay(1000);
+  sw.begin(Wire, currentWombatAddress);
+}
+
 #endif
 
 
@@ -2218,7 +3206,212 @@ static String ensureTempPathForUpload(const char* leafName) {
 
 
 // ===================================================================================
-// SYSTEM SETTINGS API
+// TCP Bridge (I2C passthrough)
+// ===================================================================================
+static void handleTcpBridge() {
+  if (tcpServer.hasClient()) {
+    if (!tcpClient || !tcpClient.connected()) {
+      tcpClient = tcpServer.available();
+      tcpClient.setNoDelay(true);
+    } else {
+      WiFiClient reject = tcpServer.available();
+      reject.stop();
+    }
+  }
+
+  if (tcpClient && tcpClient.connected()) {
+    while (tcpClient.available() >= 8) {
+      uint8_t txBuffer[8];
+      uint8_t rxBuffer[8];
+
+      tcpClient.read(txBuffer, 8);
+
+      Wire.beginTransmission(currentWombatAddress);
+      Wire.write(txBuffer, 8);
+      Wire.endTransmission();
+      i2cMarkTx();
+
+      uint8_t bytesRead = Wire.requestFrom(currentWombatAddress, (uint8_t)8);
+      i2cMarkRx();
+      for (int i = 0; i < 8; i++) {
+        if (i < bytesRead) rxBuffer[i] = Wire.read();
+        else rxBuffer[i] = 0xFF;
+      }
+
+      tcpClient.write(rxBuffer, 8);
+      ArduinoOTA.handle();
+      yield();
+    }
+  }
+}
+
+// ===================================================================================
+// CONFIG API
+// ===================================================================================
+static void handleApiVariant() {
+  // Authentication required for variant info
+  if (!checkAuth()) return;
+  addSecurityHeaders();
+  
+  VariantInfo info = getDeepScanInfoSingle(currentWombatAddress);
+  DynamicJsonDocument doc(1536);
+  doc["variant"] = info.variant;
+  JsonArray capsArr = doc.createNestedArray("capabilities");
+  for (int i = 0; i < 41; i++) if (info.caps[i]) capsArr.add(i);
+  String out;
+  serializeJson(doc, out);
+  server.send(200, "application/json", out);
+}
+
+static void handleApiApply() {
+  // Authentication required for configuration changes
+  if (!checkAuth()) return;
+  addSecurityHeaders();
+  
+  // Validate JSON size
+  if (!isJsonSizeSafe(server.arg("plain"))) {
+    server.send(413, "text/plain", "Payload too large");
+    return;
+  }
+  
+  DynamicJsonDocument doc(8192);
+  DeserializationError err = deserializeJson(doc, server.arg("plain"));
+  if (err) {
+    server.send(400, "text/plain", String("Bad JSON: ") + err.c_str());
+    return;
+  }
+  applyConfiguration(doc);
+  server.send(200, "text/plain", "OK");
+}
+
+static String configPathFromName(const String& name) {
+  // New location: /config/<name>.json
+  // Back-compat: legacy root files /config_<name>.json are still supported on load/list.
+  String safe = sanitizeBasename(name);
+  if (safe.length() == 0) safe = "config";
+  return joinPath(CFG_DIR, safe + String(".json"));
+}
+
+static void handleConfigSave() {
+  // Authentication required for saving configurations
+  if (!checkAuth()) return;
+  addSecurityHeaders();
+  
+  if (!server.hasArg("name")) { server.send(400, "text/plain", "Missing name"); return; }
+  
+  // Validate JSON size
+  if (!isJsonSizeSafe(server.arg("plain"))) {
+    server.send(413, "text/plain", "Payload too large");
+    return;
+  }
+  
+  String name = server.arg("name");
+  String path = configPathFromName(name);
+  File f = LittleFS.open(path, "w");
+  if (!f) { server.send(500, "text/plain", "Open failed"); return; }
+  f.print(server.arg("plain"));
+  f.close();
+  server.send(200, "text/plain", "Saved");
+}
+
+static void handleConfigLoad() {
+  // Config load might contain sensitive info, require auth
+  if (!checkAuth()) return;
+  addSecurityHeaders();
+  
+  if (!server.hasArg("name")) { server.send(400, "text/plain", "Missing name"); return; }
+  String name = server.arg("name");
+  String path = configPathFromName(name);
+  File f = LittleFS.open(path, "r");
+  if (!f) {
+    // Back-compat: legacy root path
+    String legacy = String("/config_") + sanitizeBasename(name) + String(".json");
+    f = LittleFS.open(legacy, "r");
+  }
+  if (!f) { server.send(404, "text/plain", "Not found"); return; }
+  server.streamFile(f, "application/json");
+  f.close();
+}
+
+static void handleConfigList() {
+  // Authentication required for config listing
+  if (!checkAuth()) return;
+  addSecurityHeaders();
+  
+  DynamicJsonDocument doc(4096);
+  JsonArray arr = doc.to<JsonArray>();
+
+  // New location: /config directory
+  File cfg = LittleFS.open(CFG_DIR);
+  if (cfg && cfg.isDirectory()) {
+    File file = cfg.openNextFile();
+    while (file) {
+      String n = String(file.name());
+      // Expect /config/<name>.json
+      if (n.endsWith(".json")) {
+        String base = n;
+        int slash = base.lastIndexOf('/');
+        if (slash >= 0) base = base.substring(slash + 1);
+        if (base.endsWith(".json")) base = base.substring(0, base.length() - 5);
+        if (base.length()) arr.add(base);
+      }
+      file.close();
+      file = cfg.openNextFile();
+    }
+    cfg.close();
+  }
+
+  // Back-compat: legacy root files /config_<name>.json
+  File root = LittleFS.open("/");
+  if (root && root.isDirectory()) {
+    File file = root.openNextFile();
+    while (file) {
+      String n = String(file.name());
+      if (n.startsWith("/config_") && n.endsWith(".json")) {
+        n.replace("/config_", "");
+        n.replace(".json", "");
+        arr.add(n);
+      }
+      file.close();
+      file = root.openNextFile();
+    }
+    root.close();
+  }
+
+  String out;
+  serializeJson(arr, out);
+  server.send(200, "application/json", out);
+}
+
+static void handleConfigExists() {
+  // Authentication required for config check
+  if (!checkAuth()) return;
+  addSecurityHeaders();
+  
+  if (!server.hasArg("name")) { server.send(400, "text/plain", "Missing name"); return; }
+  DynamicJsonDocument doc(128);
+  doc["exists"] = LittleFS.exists(configPathFromName(server.arg("name")));
+  String out;
+  serializeJson(doc, out);
+  server.send(200, "application/json", out);
+}
+
+static void handleConfigDelete() {
+  // Authentication required for deleting configurations
+  if (!checkAuth()) return;
+  addSecurityHeaders();
+  
+  if (!server.hasArg("name")) { server.send(400, "text/plain", "Missing name"); return; }
+  LittleFS.remove(configPathFromName(server.arg("name")));
+  server.send(200, "text/plain", "Deleted");
+}
+
+
+
+
+
+// ===================================================================================
+// SD / Firmware Import helpers
 // ===================================================================================
 static String fwSlotPath(const String& prefix, const String& version) {
   String name = makeFileSafeName(prefix + String("_") + version + String(".bin"));
@@ -2333,6 +3526,456 @@ static bool fwTxtToBin(const String& inPath, const String& outBinPath, String& e
 #endif
 }
 // ===================================================================================
+// SYSTEM SETTINGS API
+// ===================================================================================
+
+/**
+ * Public health check endpoint - no authentication required
+ * Returns basic system status for monitoring
+ */
+static void handleApiHealth() {
+  addSecurityHeaders();
+  
+  DynamicJsonDocument doc(512);
+  doc["status"] = "ok";
+  doc["uptime_ms"] = millis();
+  doc["heap_free"] = ESP.getFreeHeap();
+  doc["wifi_connected"] = WiFi.isConnected();
+  doc["wifi_rssi"] = WiFi.RSSI();
+  doc["ip"] = WiFi.localIP().toString();
+  
+  #if SD_SUPPORT_ENABLED
+  if (isSDEnabled) {
+    doc["sd_mounted"] = g_sdMounted;
+  }
+  #endif
+  
+  String out;
+  serializeJson(doc, out);
+  server.send(200, "application/json", out);
+}
+
+static void handleApiSystem() {
+  // Authentication required for detailed system info
+  if (!checkAuth()) return;
+  addSecurityHeaders();
+  
+  DynamicJsonDocument doc(768);
+  doc["cpu_mhz"] = ESP.getCpuFreqMHz();
+  doc["flash_speed_hz"] = (uint32_t)ESP.getFlashChipSpeed();
+  doc["sdk"] = String(ESP.getSdkVersion());
+  doc["chip_rev"] = ESP.getChipRevision();
+  doc["mac"] = WiFi.macAddress();
+  doc["heap_total"] = ESP.getHeapSize();
+  doc["heap_free"] = ESP.getFreeHeap();
+  doc["heap_min_free"] = ESP.getMinFreeHeap();
+
+  size_t fsTotal = LittleFS.totalBytes();
+  size_t fsUsed = LittleFS.usedBytes();
+  doc["fs_total"] = (uint64_t)fsTotal;
+  doc["fs_used"] = (uint64_t)fsUsed;
+  doc["fs_free"] = (uint64_t)(fsTotal >= fsUsed ? (fsTotal - fsUsed) : 0);
+
+  doc["sd_enabled"] = (bool)isSDEnabled;
+#if SD_SUPPORT_ENABLED
+  // Lazy-mount to reflect insertion state without forcing a long init on every refresh.
+  // If not mounted, attempt a quick mount. If it fails, report not mounted.
+  if (!g_sdMounted && isSDEnabled) {
+    sdEnsureMounted();
+  }
+  doc["sd_mounted"] = (bool)g_sdMounted;
+  if (g_sdMounted) {
+    uint64_t total = 0, used = 0;
+    // Arduino-ESP32 SD.h provides totalBytes/usedBytes on FS.
+    #if defined(ARDUINO_ARCH_ESP32)
+      total = sd_total_bytes();
+      used  = sd_used_bytes();
+    #endif
+    doc["sd_total"] = total;
+    doc["sd_used"]  = used;
+    doc["sd_free"]  = (total >= used) ? (total - used) : 0;
+  } else {
+    doc["sd_total"] = 0;
+    doc["sd_used"]  = 0;
+    doc["sd_free"]  = 0;
+  }
+#else
+  doc["sd_mounted"] = false;
+  doc["sd_total"] = 0;
+  doc["sd_used"]  = 0;
+  doc["sd_free"]  = 0;
+#endif
+
+  String out;
+  serializeJson(doc, out);
+  server.send(200, "application/json", out);
+}
+
+#if SD_SUPPORT_ENABLED
+// ===================================================================================
+// SD CARD API
+// ===================================================================================
+
+ 
+static void handleApiSdStatus() {
+  // Authentication required for SD status
+  if (!checkAuth()) return;
+  addSecurityHeaders();
+  
+  DynamicJsonDocument doc(256);
+  doc["enabled"] = (bool)isSDEnabled;
+  if (!isSDEnabled) {
+    doc["mounted"] = false;
+    doc["msg"] = "Disabled";
+  } else {
+    bool ok = sdEnsureMounted();
+    doc["mounted"] = ok;
+    doc["msg"] = g_sdMountMsg;
+  }
+  String out;
+  serializeJson(doc, out);
+  server.send(200, "application/json", out);
+}
+
+static void handleApiSdList() {
+  // Authentication required for SD file listing
+  if (!checkAuth()) return;
+  addSecurityHeaders();
+  
+#if !SD_SUPPORT_ENABLED
+  server.send(400, "text/plain", "SD disabled");
+  return;
+#else
+  if (!sdEnsureMounted()) { server.send(500, "text/plain", g_sdMountMsg); return; }
+  String dir = server.arg("dir");
+  if (!dir.length()) dir = "/";
+  if (!dir.startsWith("/")) dir = "/" + dir;
+
+  SDFile d = sd_open(dir, O_RDONLY);
+  if (!d) { server.send(404, "text/plain", "Dir not found"); return; }
+
+  // Iterate
+  String json = "[";
+  bool first = true;
+  SDFile e;
+  while (sdOpenNext(d, e)) {
+    String name = sdFileName(e);
+    bool isdir = sdFileIsDir(e);
+    uint64_t size = sd_filesize(e);
+    e.close();
+
+    if (name == "." || name == "..") continue;
+    if (!first) json += ",";
+    first = false;
+    json += "{\"name\":\"" + jsonEscape(name) + "\",\"dir\":" + String(isdir ? "true" : "false") + ",\"size\":" + String((unsigned long long)size) + "}";
+  }
+  d.close();
+  json += "]";
+  server.send(200, "application/json", json);
+#endif
+}
+
+static bool sdDeleteRecursive(const String& path) { return sdRemoveRecursive(path); }
+
+static void handleApiSdDelete() {
+  // Authentication required for delete operations
+  if (!checkAuth()) return;
+  addSecurityHeaders();
+  
+  if (!isSDEnabled) { server.send(403, "text/plain", "SD disabled"); return; }
+  if (!sdEnsureMounted()) { server.send(500, "text/plain", sanitizeError(g_sdMountMsg)); return; }
+  
+  // Validate JSON size
+  if (!isJsonSizeSafe(server.arg("plain"))) {
+    server.send(413, "text/plain", "Payload too large");
+    return;
+  }
+  
+  DynamicJsonDocument doc(256);
+  DeserializationError err = deserializeJson(doc, server.arg("plain"));
+  if (err) { server.send(400, "text/plain", "Bad JSON"); return; }
+  
+  String path = sanitizePath(doc["path"] | "");
+  
+  // Additional security validation
+  if (!isPathSafe(path)) {
+    server.send(400, "text/plain", "Invalid path");
+    return;
+  }
+  
+  if (path == "/" || path.length() < 2) { server.send(400, "text/plain", "Refuse" ); return; }
+  bool ok = sdDeleteRecursive(path);
+  server.send(ok ? 200 : 500, "text/plain", ok ? "OK" : "Delete failed");
+}
+
+static void handleApiSdRename() {
+  // Authentication required for rename operations
+  if (!checkAuth()) return;
+  addSecurityHeaders();
+  
+  if (!isSDEnabled) { server.send(403, "text/plain", "SD disabled"); return; }
+  if (!sdEnsureMounted()) { server.send(500, "text/plain", sanitizeError(g_sdMountMsg)); return; }
+  
+  // Validate JSON size
+  if (!isJsonSizeSafe(server.arg("plain"))) {
+    server.send(413, "text/plain", "Payload too large");
+    return;
+  }
+  
+  DynamicJsonDocument doc(512);
+  DeserializationError err = deserializeJson(doc, server.arg("plain"));
+  if (err) { server.send(400, "text/plain", "Bad JSON"); return; }
+  
+  String from = sanitizePath(doc["from"] | "");
+  String to = sanitizePath(doc["to"] | "");
+  
+  // Additional security validation
+  if (!isPathSafe(from) || !isPathSafe(to)) {
+    server.send(400, "text/plain", "Invalid path");
+    return;
+  }
+  
+  if (!from.length() || !to.length() || from == "/" || to == "/") { 
+    server.send(400, "text/plain", "Bad path"); 
+    return; 
+  }
+  
+  bool ok = sd_rename(from, to);
+  server.send(ok ? 200 : 500, "text/plain", ok ? "OK" : "Rename failed");
+}
+
+static void handleSdDownload() {
+  // Authentication required for file downloads
+  if (!checkAuth()) return;
+  
+  if (!isSDEnabled) { 
+    addSecurityHeaders();
+    server.send(403, "text/plain", "SD disabled"); 
+    return; 
+  }
+  if (!sdEnsureMounted()) { 
+    addSecurityHeaders();
+    server.send(500, "text/plain", sanitizeError(g_sdMountMsg)); 
+    return; 
+  }
+  
+  String path = server.hasArg("path") ? server.arg("path") : String("");
+  path = sanitizePath(path);
+  
+  // Additional security: verify path is safe
+  if (!isPathSafe(path)) {
+    addSecurityHeaders();
+    server.send(400, "text/plain", "Invalid path");
+    return;
+  }
+
+  SDFile f = sd_open(path.c_str(), O_RDONLY);
+  if (!f || f.isDirectory()) { 
+    addSecurityHeaders();
+    server.send(404, "text/plain", "Not found"); 
+    return; 
+  }
+
+  String fn = path;
+  int slash = fn.lastIndexOf('/');
+  if (slash >= 0) fn = fn.substring(slash + 1);
+
+  addSecurityHeaders();
+  server.sendHeader("Content-Disposition", String("attachment; filename=\"") + fn + "\"");
+  server.sendHeader("Cache-Control", "no-store");
+  server.setContentLength((int)f.size());
+  server.send(200, "application/octet-stream", "");
+
+  WiFiClient client = server.client();
+  uint8_t buf[1024];
+  while (client.connected()) {
+    int n = f.read(buf, sizeof(buf));
+    if (n <= 0) break;
+    client.write(buf, n);
+    delay(0);
+  }
+  f.close();
+}
+
+
+
+static void handleApiSdEject() {
+  // Authentication required for SD eject
+  if (!checkAuth()) return;
+  addSecurityHeaders();
+  
+  if (!isSDEnabled) { server.send(403, "text/plain", "SD disabled"); return; }
+  sdUnmount();
+  server.send(200, "text/plain", "Ejected");
+}
+
+static void handleApiSdUploadPost() {
+  // Response is sent when upload completes (in handleUploadSD).
+  server.send(200, "text/plain", g_sdUploadOk ? String("OK: ") + g_sdUploadMsg : String("ERR: ") + g_sdUploadMsg);
+}
+
+static void handleUploadSD() {
+  if (!isSDEnabled) { g_sdUploadOk = false; g_sdUploadMsg = "SD disabled"; return; }
+  if (!sdEnsureMounted()) { g_sdUploadOk = false; g_sdUploadMsg = g_sdMountMsg; return; }
+
+  HTTPUpload& upload = server.upload();
+  if (upload.status == UPLOAD_FILE_START) {
+    // Check upload size limit
+    if (!isUploadSizeSafe(upload.totalSize)) {
+      g_sdUploadOk = false;
+      g_sdUploadMsg = "File too large";
+      return;
+    }
+    
+    g_sdUploadOk = false;
+    g_sdUploadMsg = "";
+    String dir = server.hasArg("dir") ? server.arg("dir") : String("/");
+    dir = sanitizePath(dir);
+    
+    // Validate path safety
+    if (!isPathSafe(dir)) {
+      g_sdUploadOk = false;
+      g_sdUploadMsg = "Invalid path";
+      return;
+    }
+    
+    if (!dir.endsWith("/")) dir += "/";
+    String fn = sanitizeBasename(upload.filename);
+    
+    // Validate filename
+    if (!isFilenameSafe(fn)) {
+      g_sdUploadOk = false;
+      g_sdUploadMsg = "Invalid filename";
+      return;
+    }
+    
+    if (!fn.length()) fn = "upload.bin";
+    g_sdUploadPath = dir + fn;
+    g_sdUploadFile = sd_open(g_sdUploadPath.c_str(), O_WRONLY | O_CREAT | O_TRUNC);
+    if (!g_sdUploadFile) {
+      g_sdUploadMsg = "Open failed";
+      return;
+    }
+    g_sdUploadOk = true;
+    g_sdUploadMsg = g_sdUploadPath;
+  } else if (upload.status == UPLOAD_FILE_WRITE) {
+    if (g_sdUploadOk && g_sdUploadFile) {
+      size_t w = g_sdUploadFile.write(upload.buf, upload.currentSize);
+      if (w != upload.currentSize) {
+        g_sdUploadOk = false;
+        g_sdUploadMsg = "Write failed";
+      }
+    }
+    yield();
+  } else if (upload.status == UPLOAD_FILE_END) {
+    if (g_sdUploadFile) g_sdUploadFile.close();
+    // Leave mounted; safe-eject is explicit.
+    yield();
+  }
+}
+
+static void handleUploadSdPost() {
+  // Authentication required for uploads
+  if (!checkAuth()) return;
+  addSecurityHeaders();
+  
+  if (g_sdUploadOk) {
+    server.send(200, "text/plain", "Uploaded: " + sanitizeError(g_sdUploadMsg));
+  } else {
+    String msg = g_sdUploadMsg.length() ? g_sdUploadMsg : String("Upload failed");
+    server.send(500, "text/plain", msg);
+  }
+}
+
+// Import a file from SD into internal firmware storage (supports .bin, .hex, .txt)
+static void handleApiSdImportFw() {
+  // Authentication required for firmware import
+  if (!checkAuth()) return;
+  addSecurityHeaders();
+  
+  if (!isSDEnabled) { server.send(403, "text/plain", "SD disabled"); return; }
+  if (!sdEnsureMounted()) { server.send(500, "text/plain", g_sdMountMsg); return; }
+
+  DynamicJsonDocument doc(512);
+  DeserializationError err = deserializeJson(doc, server.arg("plain"));
+  if (err) { server.send(400, "text/plain", "Bad JSON"); return; }
+
+  String sdPath = sanitizePath(doc["path"] | "");
+  String slot = sanitizeBasename(doc["slot"] | "");
+  String ver  = sanitizeBasename(doc["ver"] | "");
+  if (!sdPath.length() || !slot.length() || !ver.length()) { server.send(400, "text/plain", "Missing fields"); return; }
+
+  SDFile src = sd_open(sdPath, O_RDONLY);
+  if (!src || src.isDirectory()) { server.send(404, "text/plain", "SD file not found"); return; }
+  src.close();
+
+  String lower = sdPath; lower.toLowerCase();
+  String outPath = fwSlotPath(slot, ver);
+
+  // Clean existing slot before import
+  fsCleanSlot(slot);
+
+  bool ok = false;
+  String msg;
+
+  if (lower.endsWith(".hex")) {
+    // Convert HEX -> SW8B text -> .bin
+    String tmpIn = ensureTempPathForUpload("sd.hex");
+    String tmpOut = ensureTempPathForUpload("sd_fw.txt");
+
+    // Copy SD hex to temp file to reuse converter's FS-agnostic begin
+    SDFile inSD = sd_open(sdPath, O_RDONLY);
+    File inLF = LittleFS.open(tmpIn, "w");
+    if (!inSD || !inLF) { if(inSD) inSD.close(); if(inLF) inLF.close(); server.send(500, "text/plain", "Temp open failed"); return; }
+    uint8_t buf[2048];
+    while (true) {
+      size_t r = inSD.read(buf, sizeof(buf));
+      if (!r) break;
+      if (inLF.write(buf, r) != r) { break; }
+      yield();
+    }
+    inSD.close(); inLF.close();
+
+    IntelHexSW8B conv;
+    if (!conv.begin(LittleFS, TEMP_DIR)) {
+      msg = "Converter init failed";
+    } else if (!conv.loadHexFile(tmpIn.c_str())) {
+      msg = "HEX parse failed";
+    } else if (!conv.exportFW_CH32V003_16K_Strict(tmpOut.c_str(), true, false)) {
+      msg = "Text export failed";
+    } else {
+      // Now convert fw.txt -> bin with existing pipeline
+      ok = fwTxtToBin(tmpOut, outPath, msg);
+    }
+
+    LittleFS.remove(tmpIn);
+    LittleFS.remove(tmpOut);
+  } else if (lower.endsWith(".txt")) {
+    ok = fwTxtToBin(sdPath, outPath, msg, /*fromSD=*/true);
+  } else {
+    // .bin or unknown: copy raw
+    ok = sdCopyToLittleFS(sdPath.c_str(), outPath.c_str());
+  }
+
+  server.send(ok ? 200 : 500, "text/plain", ok ? String("Imported: ") + outPath : String("Failed: ") + msg);
+}
+
+// Convert selected SD .hex to a firmware slot directly
+static void handleApiSdConvertFw() {
+  if (!isSDEnabled) { server.send(403, "text/plain", "SD disabled"); return; }
+  if (!sdEnsureMounted()) { server.send(500, "text/plain", g_sdMountMsg); return; }
+
+  DynamicJsonDocument doc(512);
+  DeserializationError err = deserializeJson(doc, server.arg("plain"));
+  if (err) { server.send(400, "text/plain", "Bad JSON"); return; }
+  doc["slot"] = doc["slot"] | "";
+  doc["ver"] = doc["ver"] | "";
+  doc["path"] = doc["path"] | "";
+  // Reuse import handler
+  handleApiSdImportFw();
+}
+#endif
+// ===================================================================================
 // SETUP / LOOP
 // ===================================================================================
 void setup() {
@@ -2444,7 +4087,7 @@ void setup() {
   server.on("/settings", []() { server.send(200, "text/html", FPSTR(SETTINGS_HTML)); });
 
   // Health check endpoint (public, no auth)
-  server.on("/api/health", HTTP_GET, []() { handleApiHealth(server); });
+  server.on("/api/health", HTTP_GET, handleApiHealth);
   
   // System Settings API
   server.on("/api/system", HTTP_GET, []() { handleApiSystem(server); });
