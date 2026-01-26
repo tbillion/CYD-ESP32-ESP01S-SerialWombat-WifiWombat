@@ -64,7 +64,7 @@ jobs:
 
       # Cache PlatformIO toolchains/frameworks/libs (this is the important cache for ESP32 builds)
       - name: Cache PlatformIO
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             ~/.platformio
