@@ -18,7 +18,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
 
       # Detect whether pip dependency files exist (required to use setup-python cache:pip safely)
       - name: Detect Python dependency files
