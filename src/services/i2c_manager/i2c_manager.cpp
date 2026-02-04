@@ -3,17 +3,47 @@
 // ===================================================================================
 // Pin Mode Strings (PROGMEM lookup table)
 // ===================================================================================
-const char* const pinModeStrings[] PROGMEM = {
-  "DIGITAL_IO", "CONTROLLED", "ANALOGINPUT", "SERVO", "THROUGHPUT_CONSUMER",
-  "QUADRATURE_ENC", "HBRIDGE", "WATCHDOG", "PROTECTEDOUTPUT", "COUNTER",
-  "DEBOUNCE", "TM1637", "WS2812", "SW_UART", "INPUT_PROCESSOR",
-  "MATRIX_KEYPAD", "PWM", "UART0_TXRX", "PULSE_TIMER", "DMA_PULSE_OUTPUT",
-  "ANALOG_THROUGHPUT", "FRAME_TIMER", "TOUCH", "UART1_TXRX", "RESISTANCE_INPUT",
-  "PULSE_ON_CHANGE", "HF_SERVO", "ULTRASONIC_DISTANCE", "LIQUID_CRYSTAL",
-  "HS_CLOCK", "HS_COUNTER", "VGA", "PS2_KEYBOARD", "I2C_CONTROLLER",
-  "QUEUED_PULSE_OUTPUT", "MAX7219MATRIX", "FREQUENCY_OUTPUT", "IR_RX",
-  "IR_TX", "RC_PPM", "BLINK"
-};
+const char* const pinModeStrings[] PROGMEM = {"DIGITAL_IO",
+                                              "CONTROLLED",
+                                              "ANALOGINPUT",
+                                              "SERVO",
+                                              "THROUGHPUT_CONSUMER",
+                                              "QUADRATURE_ENC",
+                                              "HBRIDGE",
+                                              "WATCHDOG",
+                                              "PROTECTEDOUTPUT",
+                                              "COUNTER",
+                                              "DEBOUNCE",
+                                              "TM1637",
+                                              "WS2812",
+                                              "SW_UART",
+                                              "INPUT_PROCESSOR",
+                                              "MATRIX_KEYPAD",
+                                              "PWM",
+                                              "UART0_TXRX",
+                                              "PULSE_TIMER",
+                                              "DMA_PULSE_OUTPUT",
+                                              "ANALOG_THROUGHPUT",
+                                              "FRAME_TIMER",
+                                              "TOUCH",
+                                              "UART1_TXRX",
+                                              "RESISTANCE_INPUT",
+                                              "PULSE_ON_CHANGE",
+                                              "HF_SERVO",
+                                              "ULTRASONIC_DISTANCE",
+                                              "LIQUID_CRYSTAL",
+                                              "HS_CLOCK",
+                                              "HS_COUNTER",
+                                              "VGA",
+                                              "PS2_KEYBOARD",
+                                              "I2C_CONTROLLER",
+                                              "QUEUED_PULSE_OUTPUT",
+                                              "MAX7219MATRIX",
+                                              "FREQUENCY_OUTPUT",
+                                              "IR_RX",
+                                              "IR_TX",
+                                              "RC_PPM",
+                                              "BLINK"};
 
 // ===================================================================================
 // I2C Deep Scan - Variant Detection
@@ -21,7 +51,8 @@ const char* const pinModeStrings[] PROGMEM = {
 VariantInfo getDeepScanInfoSingle(uint8_t addr) {
   VariantInfo info;
   info.variant = "Unknown";
-  for (int i = 0; i < 41; i++) info.caps[i] = false;
+  for (int i = 0; i < 41; i++)
+    info.caps[i] = false;
 
   SerialWombat sw_scan;
   sw_scan.begin(Wire, addr, false);
@@ -70,8 +101,10 @@ void handleScanData(WebServer& server) {
       count++;
     }
   }
-  if (count == 0) found = "No devices found.";
-  else found += "<br>Total: " + String(count);
+  if (count == 0)
+    found = "No devices found.";
+  else
+    found += "<br>Total: " + String(count);
   server.send(200, "text/plain", found);
 }
 
@@ -79,7 +112,13 @@ void handleScanData(WebServer& server) {
 void handleDeepScan(WebServer& server) {
   server.setContentLength(CONTENT_LENGTH_UNKNOWN);
   server.send(200, "text/html", "");
-  server.sendContent(F("<!DOCTYPE HTML><html><head><meta name='viewport' content='width=device-width, initial-scale=1'><style>body{font-family:monospace;background:#222;color:#eee;padding:10px;}.chip{border:1px solid #0f0;padding:10px;margin-bottom:10px;background:#333;}h3{color:#00d2ff;margin:0;}b{color:#0f0;}.btn{display:block;padding:10px;background:#007acc;color:white;text-align:center;text-decoration:none;margin-top:20px;}</style></head><body><h2>Serial Wombat Deep Scan</h2>"));
+  server.sendContent(F(
+      "<!DOCTYPE HTML><html><head><meta name='viewport' content='width=device-width, "
+      "initial-scale=1'><style>body{font-family:monospace;background:#222;color:#eee;padding:10px;}"
+      ".chip{border:1px solid "
+      "#0f0;padding:10px;margin-bottom:10px;background:#333;}h3{color:#00d2ff;margin:0;}b{color:#"
+      "0f0;}.btn{display:block;padding:10px;background:#007acc;color:white;text-align:center;text-"
+      "decoration:none;margin-top:20px;}</style></head><body><h2>Serial Wombat Deep Scan</h2>"));
 
   SerialWombat sw_scan;
   for (int i2cAddress = 0x0E; i2cAddress <= 0x77; ++i2cAddress) {
@@ -119,8 +158,10 @@ void handleDeepScan(WebServer& server) {
         }
 
         out += "<b>Serial Wombat Found!</b><br>";
-        if (sw_scan.inBoot) out += "STATUS: <b style='color:orange'>BOOT MODE</b><br>";
-        else out += "STATUS: <b>APP MODE</b><br>";
+        if (sw_scan.inBoot)
+          out += "STATUS: <b style='color:orange'>BOOT MODE</b><br>";
+        else
+          out += "STATUS: <b>APP MODE</b><br>";
 
         out += "Model: " + String((char*)sw_scan.model) + "<br>";
         out += "FW Version: " + String((char*)sw_scan.fwVersion) + "<br>";

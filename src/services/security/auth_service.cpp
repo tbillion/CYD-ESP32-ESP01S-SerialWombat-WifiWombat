@@ -7,7 +7,7 @@ uint8_t g_auth_fail_count = 0;
 /**
  * Add security headers to HTTP response
  * Implements: CORS, CSP, X-Frame-Options, X-Content-Type-Options
- * 
+ *
  * Notes:
  * - HSTS is included but only effective over HTTPS (not yet implemented)
  * - CSP uses 'unsafe-inline' due to embedded HTML with inline scripts
@@ -18,7 +18,8 @@ void addSecurityHeaders(WebServer& server) {
   server.sendHeader("X-Frame-Options", "DENY");
   server.sendHeader("X-XSS-Protection", "1; mode=block");
   // CSP: 'unsafe-inline' required for embedded HTML, consider external JS in future
-  server.sendHeader("Content-Security-Policy", "default-src 'self' 'unsafe-inline'; img-src 'self' data:;");
+  server.sendHeader("Content-Security-Policy",
+                    "default-src 'self' 'unsafe-inline'; img-src 'self' data:;");
   // HSTS: Only effective over HTTPS, included for future HTTPS implementation
   server.sendHeader("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
   // CORS - PRODUCTION WARNING: Change CORS_ALLOW_ORIGIN to specific domain

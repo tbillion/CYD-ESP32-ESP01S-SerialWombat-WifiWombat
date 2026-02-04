@@ -1,16 +1,16 @@
 /*
  * TCP Bridge Service - Header
- * 
+ *
  * Provides TCP-to-I2C bridge functionality for remote SerialWombat access.
  * Listens on TCP port 3000 and forwards 8-byte packets to/from I2C devices.
- * 
+ *
  * Extracted from original .ino file (lines 3812-3847).
  */
 
 #pragma once
 
-#include <WiFiServer.h>
 #include <WiFiClient.h>
+#include <WiFiServer.h>
 #include <stdint.h>
 
 // TCP Bridge Configuration

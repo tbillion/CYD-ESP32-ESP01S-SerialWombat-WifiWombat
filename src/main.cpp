@@ -1,11 +1,12 @@
 /*
  * CYD ESP32 Serial Wombat WiFi Bridge - Main Entry Point
- * 
+ *
  * This is the refactored entry point that delegates to modular components.
  * Original monolithic code has been extracted into services, HAL, and UI modules.
  */
 
 #include <Arduino.h>
+
 #include "app/app.h"
 
 void setup() {

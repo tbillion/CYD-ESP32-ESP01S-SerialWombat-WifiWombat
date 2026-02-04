@@ -1,20 +1,21 @@
 #include "sd_storage.h"
+
 #include "../../config/defaults.h"
 
 #if SD_SUPPORT_ENABLED
 
-#include <LittleFS.h>
+#  include <LittleFS.h>
 
 // Shared SD state
-bool   g_sdMounted = false;
+bool g_sdMounted = false;
 String g_sdMountMsg = "";
-int    g_sd_cs   = SD_CS;
-int    g_sd_mosi = SD_MOSI;
-int    g_sd_miso = SD_MISO;
-int    g_sd_sck  = SD_SCK;
+int g_sd_cs = SD_CS;
+int g_sd_mosi = SD_MOSI;
+int g_sd_miso = SD_MISO;
+int g_sd_sck = SD_SCK;
 
 // Upload state
-bool   g_sdUploadOk = false;
+bool g_sdUploadOk = false;
 String g_sdUploadMsg;
 
 // SdFat backend
@@ -40,29 +41,29 @@ void sdUnmount() {
   g_sdMounted = false;
 }
 
-bool sdExists(const char* path) { 
-  if (!g_sdMounted && !sdMount()) return false; 
-  return sd.exists(path); 
+bool sdExists(const char* path) {
+  if (!g_sdMounted && !sdMount()) return false;
+  return sd.exists(path);
 }
 
-bool sdMkdir(const char* path) { 
-  if (!g_sdMounted && !sdMount()) return false; 
-  return sd.mkdir(path); 
+bool sdMkdir(const char* path) {
+  if (!g_sdMounted && !sdMount()) return false;
+  return sd.mkdir(path);
 }
 
-bool sdRemove(const char* path) { 
-  if (!g_sdMounted && !sdMount()) return false; 
-  return sd.remove(path); 
+bool sdRemove(const char* path) {
+  if (!g_sdMounted && !sdMount()) return false;
+  return sd.remove(path);
 }
 
-bool sdRmdir(const char* path) { 
-  if (!g_sdMounted && !sdMount()) return false; 
-  return sd.rmdir(path); 
+bool sdRmdir(const char* path) {
+  if (!g_sdMounted && !sdMount()) return false;
+  return sd.rmdir(path);
 }
 
-bool sdRename(const char* f, const char* t) { 
-  if (!g_sdMounted && !sdMount()) return false; 
-  return sd.rename(f, t); 
+bool sdRename(const char* f, const char* t) {
+  if (!g_sdMounted && !sdMount()) return false;
+  return sd.rename(f, t);
 }
 
 SDFile sdOpen(const char* path, oflag_t flags) {
@@ -78,8 +79,9 @@ bool sdIsDir(const char* path) {
   return isDir;
 }
 
-bool sdGetStats(uint64_t &totalBytes, uint64_t &usedBytes) {
-  totalBytes = 0; usedBytes = 0;
+bool sdGetStats(uint64_t& totalBytes, uint64_t& usedBytes) {
+  totalBytes = 0;
+  usedBytes = 0;
   if (!g_sdMounted && !sdMount()) return false;
   if (!sd.vol()) return false;
   uint32_t cCount = sd.vol()->clusterCount();
@@ -92,18 +94,18 @@ bool sdGetStats(uint64_t &totalBytes, uint64_t &usedBytes) {
   return true;
 }
 
-bool sdFileIsDir(SDFile &f) {
+bool sdFileIsDir(SDFile& f) {
   return f.isDir();
 }
 
-String sdFileName(SDFile &f) {
+String sdFileName(SDFile& f) {
   char nm[96];
-  nm[0]=0;
+  nm[0] = 0;
   f.getName(nm, sizeof(nm));
   return String(nm);
 }
 
-bool sdOpenNext(SDFile &dir, SDFile &out) {
+bool sdOpenNext(SDFile& dir, SDFile& out) {
   SDFile tmp;
   if (!tmp.openNext(&dir, O_RDONLY)) return false;
   out = tmp;
@@ -117,26 +119,26 @@ bool sdEnsureMounted() {
 bool sdCopyToLittleFS(const char* sd_path, const char* lfs_path) {
   SDFile src = sdOpen(sd_path, O_RDONLY);
   if (!src) return false;
-  
+
   File dst = LittleFS.open(lfs_path, "w");
   if (!dst) {
     src.close();
     return false;
   }
-  
+
   uint8_t buf[512];
   while (src.available()) {
     size_t n = src.read(buf, sizeof(buf));
     if (n > 0) dst.write(buf, n);
   }
-  
+
   src.close();
   dst.close();
   return true;
 }
 
-bool sdGetUsage(uint64_t &total, uint64_t &used) {
+bool sdGetUsage(uint64_t& total, uint64_t& used) {
   return sdGetStats(total, used);
 }
 
-#endif // SD_SUPPORT_ENABLED
+#endif  // SD_SUPPORT_ENABLED

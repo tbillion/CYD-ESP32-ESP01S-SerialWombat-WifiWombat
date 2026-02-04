@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Arduino.h>
+
 #include <FS.h>
 
 // ===================================================================================
@@ -8,7 +9,7 @@
 // Source: IntelHexSW8B (zip provided)
 // ===================================================================================
 class IntelHexSW8B {
-public:
+ public:
   IntelHexSW8B();
 
   // Initialize with a filesystem (LittleFS or SD). Creates cacheDir if needed.
@@ -20,7 +21,8 @@ public:
 
   // Load and parse an Intel HEX file from the filesystem.
   // Supports record types: 00 (data), 01 (EOF), 04 (extended linear address).
-  // If enforceChecksum is true, lines with invalid checksum are ignored (like the original C# code).
+  // If enforceChecksum is true, lines with invalid checksum are ignored (like the original C#
+  // code).
   bool loadHexFile(const char* hexPath, bool enforceChecksum = false);
 
   // Bounds observed during parse (highest/lowest written absolute byte address).
@@ -28,24 +30,26 @@ public:
   uint32_t minAddress() const { return _minAddr; }
   uint32_t maxAddress() const { return _maxAddr; }
 
-  // Warnings/errors collected (duplicate addresses, out-of-range writes, missing bytes in strict export, etc.)
+  // Warnings/errors collected (duplicate addresses, out-of-range writes, missing bytes in strict
+  // export, etc.)
   const String& warnings() const { return _warnings; }
 
   // Strict export for CH32V003 16KB firmware window.
   // - Fixed range: [0x00000000, 0x00004000)
   // - Little-endian uint16 packing: word = b0 | (b1<<8)
   // - Output: 0xXXXX comma-separated, no whitespace/comments.
-  // - STRICT: If any byte in the 16KB window is missing, export fails and warnings() will report the first missing address.
-  bool exportFW_CH32V003_16K_Strict(const char* outPath,
-                                   bool trailingComma = true,
-                                   bool newlineAtEnd = false);
+  // - STRICT: If any byte in the 16KB window is missing, export fails and warnings() will report
+  // the first missing address.
+  bool exportFW_CH32V003_16K_Strict(const char* outPath, bool trailingComma = true,
+                                    bool newlineAtEnd = false);
 
   // Optional: CRC16-CCITT over a byte range, treating missing bytes as an error when strict=true.
   // This mirrors the original algorithm (poly 0x1021, init 0xFFFF).
   // If strict is true and any byte is missing, returns 0 and appends an error to warnings().
-  uint16_t crc16ccitt(uint32_t start, uint32_t exclusiveEnd, bool strict = true, uint8_t fillValue = 0xFF);
+  uint16_t crc16ccitt(uint32_t start, uint32_t exclusiveEnd, bool strict = true,
+                      uint8_t fillValue = 0xFF);
 
-private:
+ private:
   fs::FS* _fs = nullptr;
   String _cacheDir;
   String _dataPath;
@@ -58,7 +62,7 @@ private:
   String _warnings;
 
   static constexpr uint32_t PAGE_SIZE = 256;
-  static constexpr uint32_t VALID_BYTES = 32; // 256 bits => 32 bytes
+  static constexpr uint32_t VALID_BYTES = 32;  // 256 bits => 32 bytes
 
   bool ensureCacheFiles_();
 
