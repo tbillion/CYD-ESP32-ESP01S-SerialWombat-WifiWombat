@@ -37,7 +37,7 @@ jobs:
       # Python with pip cache only if dependency files exist
       - name: Set up Python (with pip cache)
         if: steps.pydeps.outputs.found == 'true'
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.11"
           cache: "pip"
@@ -51,7 +51,7 @@ jobs:
       # Python without pip cache if no dependency files exist
       - name: Set up Python (no pip cache)
         if: steps.pydeps.outputs.found != 'true'
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.11"
 
